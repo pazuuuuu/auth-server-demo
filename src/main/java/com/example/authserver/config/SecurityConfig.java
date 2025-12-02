@@ -46,17 +46,28 @@ public class SecurityConfig {
             throws Exception {
         http
             .authorizeHttpRequests((authorize) -> authorize
-                .requestMatchers("/login", "/css/**", "/images/**", "/error").permitAll()
+                .requestMatchers("/login", "/css/**", "/images/**", "/error", "/forgot-password/**", "/reset-password/**", "/webauthn/**", "/login/webauthn/**").permitAll()
                 .anyRequest().authenticated()
             )
+            .csrf(csrf -> csrf.ignoringRequestMatchers("/forgot-password/**", "/reset-password/**"))
             // Form login handles the redirect to the login page from the
             // authorization server filter chain
             .formLogin(form -> form
                 .loginPage("/login")
                 .permitAll()
-            );
+            )
+            .webAuthn(webAuthn -> webAuthn
+                .rpName("Auth Server")
+                .rpId("localhost")
+                .allowedOrigins("http://localhost:8080")
+            ); // Enable WebAuthn with explicit RP settings
 
         return http.build();
+    }
+
+    @Bean
+    public org.springframework.security.web.webauthn.management.UserCredentialRepository userCredentialRepository() {
+        return new org.springframework.security.web.webauthn.management.MapUserCredentialRepository();
     }
 
 }

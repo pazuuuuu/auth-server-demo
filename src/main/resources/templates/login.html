@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>Sign in</title>
     <link rel="stylesheet" th:href="@{/css/style.css}">
+    <meta name="_csrf" th:content="${_csrf.token}" />
+    <meta name="_csrf_header" th:content="${_csrf.headerName}" />
 </head>
+
 <body>
     <div class="login-container">
         <div class="login-header">
@@ -26,9 +30,124 @@
             <div class="form-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" class="form-control" required>
+                <div style="margin-top: 5px; text-align: right;">
+                    <a th:href="@{/forgot-password}"
+                        style="font-size: 14px; color: #007bff; text-decoration: none;">Forgot password?</a>
+                </div>
             </div>
             <button type="submit" class="btn btn-primary btn-block">Sign in</button>
         </form>
+
+        <div style="text-align: center; margin-top: 15px;">
+            <button type="button" onclick="loginWithPasskey(event)" class="btn btn-secondary btn-block"
+                style="background-color: #28a745; color: white;">Sign in with Passkey</button>
+            <div id="message" style="margin-top: 10px; color: red;"></div>
+        </div>
     </div>
+
+    <script>
+        async function loginWithPasskey(event) {
+            if (event) event.preventDefault();
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = "Starting Passkey login...";
+            messageDiv.style.color = "black";
+
+            try {
+                // 1. Get options
+                // We can send username if available, or empty for discoverable credentials
+                const username = document.getElementById('username').value;
+
+                const optionsResponse = await fetch('/webauthn/authenticate/options', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRF-TOKEN': getCsrfToken()
+                    },
+                    body: 'username=' + encodeURIComponent(username)
+                });
+
+                if (!optionsResponse.ok) {
+                    throw new Error('Failed to get options');
+                }
+
+                const publicKeyCredentialRequestOptions = await optionsResponse.json();
+
+                // Decode base64url fields
+                publicKeyCredentialRequestOptions.challenge = base64UrlToBuffer(publicKeyCredentialRequestOptions.challenge);
+                if (publicKeyCredentialRequestOptions.allowCredentials) {
+                    publicKeyCredentialRequestOptions.allowCredentials.forEach(cred => {
+                        cred.id = base64UrlToBuffer(cred.id);
+                    });
+                }
+
+                // 2. Get credential
+                const credential = await navigator.credentials.get({
+                    publicKey: publicKeyCredentialRequestOptions
+                });
+
+                // 3. Send to server
+                const response = await fetch('/login/webauthn', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': getCsrfToken()
+                    },
+                    body: JSON.stringify({
+                        id: credential.id,
+                        rawId: bufferToBase64Url(credential.rawId),
+                        type: credential.type,
+                        response: {
+                            authenticatorData: bufferToBase64Url(credential.response.authenticatorData),
+                            clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+                            signature: bufferToBase64Url(credential.response.signature),
+                            userHandle: credential.response.userHandle ? bufferToBase64Url(credential.response.userHandle) : null
+                        },
+                        clientExtensionResults: credential.getClientExtensionResults()
+                    })
+                });
+
+                if (response.ok) {
+                    window.location.href = '/'; // Redirect on success
+                } else {
+                    messageDiv.textContent = "Login failed.";
+                    messageDiv.style.color = "red";
+                }
+            } catch (e) {
+                console.error(e);
+                messageDiv.textContent = "Error: " + e.message;
+                messageDiv.style.color = "red";
+            }
+        }
+
+        function base64UrlToBuffer(base64url) {
+            const padding = '='.repeat((4 - base64url.length % 4) % 4);
+            const base64 = (base64url + padding)
+                .replace(/\-/g, '+')
+                .replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray.buffer;
+        }
+
+        function bufferToBase64Url(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return window.btoa(binary)
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=/g, '');
+        }
+
+        function getCsrfToken() {
+            return document.querySelector('meta[name="_csrf"]')?.content;
+        }
+    </script>
 </body>
+
 </html>

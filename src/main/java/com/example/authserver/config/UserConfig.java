@@ -11,7 +11,7 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 public class UserConfig {
 
     @Bean
-    public UserDetailsService userDetailsService() {
+    public InMemoryUserDetailsManager userDetailsService() {
         UserDetails user = User.withDefaultPasswordEncoder()
                 .username("user")
                 .password("password")
