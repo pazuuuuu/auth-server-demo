@@ -12,9 +12,12 @@ public class UserConfig {
 
     @Bean
     public InMemoryUserDetailsManager userDetailsService() {
-        UserDetails user = User.withDefaultPasswordEncoder()
+        org.springframework.security.crypto.password.PasswordEncoder encoder = 
+            org.springframework.security.crypto.factory.PasswordEncoderFactories.createDelegatingPasswordEncoder();
+        
+        UserDetails user = User.builder()
                 .username("user")
-                .password("password")
+                .password(encoder.encode("password"))
                 .roles("USER")
                 .build();
         return new InMemoryUserDetailsManager(user);

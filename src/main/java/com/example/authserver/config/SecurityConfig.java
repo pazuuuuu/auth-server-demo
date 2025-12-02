@@ -29,7 +29,7 @@ public class SecurityConfig {
             // authorization endpoint
             .exceptionHandling((exceptions) -> exceptions
                 .defaultAuthenticationEntryPointFor(
-                    new LoginUrlAuthenticationEntryPoint("/login"),
+                    new LoginUrlAuthenticationEntryPoint(SecurityConstants.LOGIN_URL),
                     new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
                 )
             )
@@ -46,20 +46,32 @@ public class SecurityConfig {
             throws Exception {
         http
             .authorizeHttpRequests((authorize) -> authorize
-                .requestMatchers("/login", "/css/**", "/images/**", "/error", "/forgot-password/**", "/reset-password/**", "/webauthn/**", "/login/webauthn/**").permitAll()
+                .requestMatchers(
+                    SecurityConstants.LOGIN_URL, 
+                    SecurityConstants.CSS_Resources, 
+                    SecurityConstants.IMAGES_Resources, 
+                    SecurityConstants.ERROR_URL, 
+                    SecurityConstants.FORGOT_PASSWORD_PREFIX, 
+                    SecurityConstants.RESET_PASSWORD_PREFIX, 
+                    SecurityConstants.WEBAUTHN_PREFIX, 
+                    SecurityConstants.LOGIN_WEBAUTHN_PREFIX
+                ).permitAll()
                 .anyRequest().authenticated()
             )
-            .csrf(csrf -> csrf.ignoringRequestMatchers("/forgot-password/**", "/reset-password/**"))
+            .csrf(csrf -> csrf.ignoringRequestMatchers(
+                SecurityConstants.FORGOT_PASSWORD_PREFIX, 
+                SecurityConstants.RESET_PASSWORD_PREFIX
+            ))
             // Form login handles the redirect to the login page from the
             // authorization server filter chain
             .formLogin(form -> form
-                .loginPage("/login")
+                .loginPage(SecurityConstants.LOGIN_URL)
                 .permitAll()
             )
             .webAuthn(webAuthn -> webAuthn
-                .rpName("Auth Server")
-                .rpId("localhost")
-                .allowedOrigins("http://localhost:8080")
+                .rpName(SecurityConstants.RP_NAME)
+                .rpId(SecurityConstants.RP_ID)
+                .allowedOrigins(SecurityConstants.ALLOWED_ORIGIN)
             ); // Enable WebAuthn with explicit RP settings
 
         return http.build();
