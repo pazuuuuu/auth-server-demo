@@ -1,5 +1,7 @@
 # Spring Authorization Server Demo
 
+[![CI](https://github.com/pazuuuuu/auth-server-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/pazuuuuu/auth-server-demo/actions/workflows/ci.yml)
+
 A secure, customizable Authentication Server built with **Spring Boot 3** and **Spring Authorization Server**.
 This project demonstrates a production-ready OIDC provider implementation with advanced security features.
 
@@ -45,6 +47,13 @@ This project demonstrates a production-ready OIDC provider implementation with a
    - **Login Page**: [http://localhost:8080/login](http://localhost:8080/login)
 
 ## Testing
+
+### Automated tests / CI
+```bash
+./mvnw verify
+```
+Tests use an in-memory H2 database (`src/test/resources/application.properties`), so no Supabase credentials are needed.
+GitHub Actions (`.github/workflows/ci.yml`) runs the same command on every pull request and every push to `main`.
 
 ### OIDC Flow
 You can use [OIDC Debugger](https://oidcdebugger.com/) to test the authentication flow:
