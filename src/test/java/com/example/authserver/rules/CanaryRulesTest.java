@@ -40,6 +40,10 @@ class CanaryRulesTest {
                 Arguments.of("web/csrf-disable", "", "http.csrf(AbstractHttpConfigurer::disable);"),
                 Arguments.of("web/csrf-disable", "", "http.csrf(c -> c.disable());"),
                 Arguments.of("web/csrf-disable", "", ".csrf(csrf -> csrf.ignoringRequestMatchers(\"/x/**\"))"),
+                Arguments.of("web/csrf-disable", "", "http.csrf((csrf) -> csrf.disable());"),
+                Arguments.of("web/csrf-disable", "", "http.csrf(CsrfConfigurer::disable);"),
+                Arguments.of("oauth/redirect-uri-https", "", ".redirectUri(\"http://127.0.0.1.attacker.example/cb\")"),
+                Arguments.of("oauth/redirect-uri-https", "", ".redirectUri(\"http://127.0.0.1@evil.example/cb\")"),
                 Arguments.of("arch/layer", "data", "import com.example.authserver.web.LoginController;"),
                 Arguments.of("arch/layer", "service", "import com.example.authserver.web.LoginController;"),
                 Arguments.of("rules/allow-needs-reason", "", "System.out.println(\"x\"); // rules:allow log/stdout"));
@@ -62,6 +66,9 @@ class CanaryRulesTest {
                 Arguments.of("", "// System.out.println(\"commented out\");"),
                 Arguments.of("", " * System.out in javadoc {noop}"),
                 Arguments.of("", "System.out.println(\"x\"); // rules:allow log/stdout カナリアの見本"),
+                Arguments.of("", "http.csrf(Customizer.withDefaults());"),
+                Arguments.of("", ".authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)"),
+                Arguments.of("", ".redirectUri(\"http://[::1]:8080/cb\")"),
                 Arguments.of("web", "import com.example.authserver.service.PasswordResetTokenService;"),
                 Arguments.of("service", "import com.example.authserver.data.UserRepository;"));
     }
@@ -94,6 +101,8 @@ class CanaryRulesTest {
                 Arguments.of(true, "logging.level.org.springframework.security=DEBUG", "config/prod-defaults"),
                 Arguments.of(true, "spring.datasource.password=hunter2", "secret/hardcoded"),
                 Arguments.of(false, "app.oidc-client.secret=plain", "secret/hardcoded"),
+                Arguments.of(false, "app.oidc-client.secret=${OIDC_CLIENT_SECRET:hunter2}", "secret/hardcoded"),
+                Arguments.of(false, "app.demo-user.password=${DEMO_USER_PASSWORD:}", null),
                 Arguments.of(true, "spring.jpa.hibernate.ddl-auto=validate", null),
                 Arguments.of(true, "spring.datasource.password=${DB_PASSWORD}", null),
                 Arguments.of(false, "logging.level.org.springframework.security=DEBUG", null));
@@ -109,6 +118,42 @@ class CanaryRulesTest {
         } else {
             assertThat(v.ruleIds()).contains(rule);
         }
+    }
+
+    static Stream<Arguments> 複数行にまたがる違反() {
+        return Stream.of(
+                Arguments.of("web/csrf-disable", Arrays.asList("http.csrf(c -> c", "    .disable());")),
+                Arguments.of("log/sensitive", Arrays.asList("log.info(\"reset link {}\",", "    resetLink);")));
+    }
+
+    @ParameterizedTest(name = "{0} は複数行でも当たる")
+    @MethodSource("複数行にまたがる違反")
+    void 複数行にまたがる違反に当たる(String rule, List<String> lines) {
+        Violations v = new Violations("canary", false);
+        AuthRules.checkJava(JAVA_FILE, lines, "", v);
+        assertThat(v.ruleIds()).contains(rule);
+    }
+
+    @ParameterizedTest(name = "{0} → {1}")
+    @MethodSource("設定ファイルの名前")
+    void 設定ファイルの名前(String name, String rule, boolean strict) {
+        Violations v = new Violations("canary", false);
+        AuthRules.checkResourceName(Paths.get("src/main/resources/" + name), v);
+        if (rule == null) {
+            assertThat(v.ruleIds()).isEmpty();
+        } else {
+            assertThat(v.ruleIds()).contains(rule);
+        }
+        assertThat(AuthRules.strictProfile(name)).isEqualTo(strict);
+    }
+
+    static Stream<Arguments> 設定ファイルの名前() {
+        return Stream.of(
+                Arguments.of("application.yml", "config/yaml-unscanned", false),
+                Arguments.of("application-prod.yaml", "config/yaml-unscanned", false),
+                Arguments.of("application.properties", null, true),
+                Arguments.of("application-prod.properties", null, true),
+                Arguments.of("application-dev.properties", null, false));
     }
 
     private static List<String> java(String layer, String line) {

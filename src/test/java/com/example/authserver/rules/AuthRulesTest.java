@@ -33,8 +33,11 @@ class AuthRulesTest {
     @Test
     void 設定ファイルが認証認可の規約を守る() throws IOException {
         Violations v = new Violations("AuthRulesTest");
+        for (Path file : files(RESOURCES, "")) {
+            AuthRules.checkResourceName(file, v);
+        }
         for (Path file : files(RESOURCES, ".properties")) {
-            AuthRules.checkProperties(file, read(file), "application.properties".equals(file.getFileName().toString()), v);
+            AuthRules.checkProperties(file, read(file), AuthRules.strictProfile(file.getFileName().toString()), v);
         }
         v.assertNone();
     }
@@ -46,7 +49,7 @@ class AuthRulesTest {
 
     private static List<Path> files(Path dir, String suffix) throws IOException {
         try (Stream<Path> s = Files.walk(dir)) {
-            return s.filter(p -> p.toString().endsWith(suffix)).sorted().collect(Collectors.toList());
+            return s.filter(Files::isRegularFile).filter(p -> p.toString().endsWith(suffix)).sorted().collect(Collectors.toList());
         }
     }
 

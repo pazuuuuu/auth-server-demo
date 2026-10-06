@@ -57,11 +57,12 @@ public class AuthorizationServerConfig {
 
     /**
      * デモ用クライアントを登録する。既にあれば同じ id のまま設定を上書きする（設定を直したら既存の DB にも効かせる）。
-     * シークレットは環境変数 OIDC_CLIENT_SECRET から受け取り、PasswordEncoder で encode して保存する。
+     * シークレットは環境変数 OIDC_CLIENT_SECRET から受け取り（32文字以上でなければ起動しない）、PasswordEncoder で encode して保存する。
      */
     @Bean
     public ApplicationRunner clientLoader(RegisteredClientRepository repository, PasswordEncoder passwordEncoder,
             @Value("${app.oidc-client.secret}") String clientSecret) {
+        requireStrongSecret(clientSecret);
         return args -> {
             String clientId = "oidc-client";
             RegisteredClient existing = repository.findByClientId(clientId);
@@ -88,6 +89,17 @@ public class AuthorizationServerConfig {
                     .build();
             repository.save(oidcClient);
         };
+    }
+
+    static final int MIN_CLIENT_SECRET_LENGTH = 32;
+
+    /** 空・短い・テンプレートのままのシークレットでは起動しない（Basic 認証が弱い値で通るのを防ぐ）。 */
+    static void requireStrongSecret(String clientSecret) {
+        if (clientSecret == null || clientSecret.isBlank() || clientSecret.length() < MIN_CLIENT_SECRET_LENGTH
+                || clientSecret.startsWith("change-me")) {
+            throw new IllegalStateException("OIDC_CLIENT_SECRET must be set to a random value of at least "
+                    + MIN_CLIENT_SECRET_LENGTH + " characters");
+        }
     }
 
     @Bean

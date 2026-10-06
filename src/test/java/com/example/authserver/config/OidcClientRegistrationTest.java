@@ -1,7 +1,5 @@
 package com.example.authserver.config;
 
-import java.util.UUID;
-
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -15,6 +13,7 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * デモ用クライアント（oidc-client）の登録内容（docs/harness.md §3.1 の oauth/*・secret/*）を、実際に DB に入った形で確かめる。
@@ -44,8 +43,8 @@ class OidcClientRegistrationTest {
     void シークレットは平文で保存しない() {
         RegisteredClient client = repository.findByClientId("oidc-client");
 
-        assertThat(client.getClientSecret()).doesNotStartWith("{noop}").isNotEqualTo("test-only-client-secret");
-        assertThat(passwordEncoder.matches("test-only-client-secret", client.getClientSecret())).isTrue();
+        assertThat(client.getClientSecret()).doesNotStartWith("{noop}").isNotEqualTo("test-only-client-secret-0123456789abcdef");
+        assertThat(passwordEncoder.matches("test-only-client-secret-0123456789abcdef", client.getClientSecret())).isTrue();
     }
 
     @Test
@@ -68,6 +67,14 @@ class OidcClientRegistrationTest {
         assertThat(client.getClientSettings().isRequireProofKey()).isTrue();
         assertThat(client.getTokenSettings().isReuseRefreshTokens()).isFalse();
         assertThat(client.getClientSecret()).doesNotStartWith("{noop}");
-        assertThat(repository.findById(UUID.randomUUID().toString())).isNull();
+    }
+
+    @Test
+    void 空や短いやテンプレートのままのシークレットでは起動しない() {
+        for (String weak : new String[] {null, "", "   ", "short-secret", "change-me", "change-me-change-me-change-me-change-me"}) {
+            assertThatThrownBy(() -> AuthorizationServerConfig.requireStrongSecret(weak))
+                    .as("weak secret: %s", weak).isInstanceOf(IllegalStateException.class);
+        }
+        AuthorizationServerConfig.requireStrongSecret("0123456789abcdef0123456789abcdef");
     }
 }

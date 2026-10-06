@@ -19,11 +19,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  * 規約センサーの違反を集めて、まとめて1回落とす（docs/harness.md §3）。
  *
  * <p>★<strong>読み手はエージェント（と人）</strong>。落ちたときのメッセージだけで直せるように、
- * 1件ごとに「どこ（file:line）」「何の規約か（ルールID）」「直し方」「根拠（CLAUDE.md の節）」を並べる。
+ * 1件ごとに「どこ（file:line）」「何の規約か（ルールID）」「直し方」「根拠（docs/harness.md の節・RFC 等）」を並べる。
  * センサーは「落ちる」だけでなく「次に何をすればよいか」まで返してはじめて、ループが自分で閉じる。</p>
  *
  * <p>抑止は<strong>その行に</strong> <code>rules:allow &lt;ルールID&gt; &lt;理由&gt;</code> と書いたときだけ効く
- * （Java は <code>//</code>、SQL は <code>--</code>、JSP は <code>&lt;%-- --%&gt;</code> のコメントで）。
+ * （Java は <code>//</code> のコメントで）。
  * 理由の無い抑止はそれ自体を違反にする＝黙って黙らせる道を作らない。</p>
  *
  * <p>あわせて、違反と抑止を1件1行の JSON で {@code target/harness/events/rules.jsonl} に追記する

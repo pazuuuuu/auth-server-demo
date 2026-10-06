@@ -1,6 +1,6 @@
 # ハーネス設計（ガイドとセンサー）
 
-> 版 v0.3（段階1・センサーを導入）／2026-10-06
+> 版 v0.4（段階1・レビューの指摘を反映）／2026-10-06
 > 元になった仕組み：`pazuuuuu/webmailer` の `docs/webmailer-harness.html`（§10 記録と自己改善ループ）。
 > 持っていき方は利用者判断で **案A＝共通部分をコピーし、認証・認可の規約は作り直す**（2026-10-06）。
 
@@ -20,8 +20,8 @@
 | 観点 | webmailer | auth-server-demo | 帰結 |
 |---|---|---|---|
 | 公開範囲 | 非公開・無料プラン | **public** | **ブランチ保護が効く**＝CI 赤のマージ禁止を機械で強制できる（webmailer は運用） |
-| スタック | Java 8（本番 Java 6）・素 Servlet・Oracle 11g | Java 17・Spring Boot 3.4・Spring Authorization Server・PostgreSQL（Supabase）・テストは H2 | 本番スタック向けの規約（`LegacyTargetRulesTest` 等）は持ってこない |
-| 規約の中身 | DB 方言・Java 6・Servlet 2.5・受信 HTML | **OAuth 2.x / OIDC・パスワード・トークン・CSRF・秘密情報** | 規約は作り直し（§3） |
+| スタック | 旧い Java・素 Servlet・商用 DB 向けの規約を持つ | Java 17・Spring Boot 3.4・Spring Authorization Server・PostgreSQL（Supabase）・テストは H2 | 旧スタック向けの規約は持ってこない |
+| 規約の中身 | DB の方言・旧スタックで動く書き方・受信 HTML | **OAuth 2.x / OIDC・パスワード・トークン・CSRF・秘密情報** | 規約は作り直し（§3） |
 | テスト | 637 件（GreenMail・組み込み Tomcat・規約） | **起動確認の1件だけ** | センサーが守れる範囲が狭い＝テストの土台を段階2で作る |
 | 外部からの入力 | 本人だけ | **誰でも PR・コメントを書ける** | 分析・提案するエージェントは外部の文字列を**データとして扱い、指示に従わない**（webmailer §10.7 をより強く） |
 | 記録（`harness-data`） | 非公開 | **公開される** | 事象に秘密情報・個人情報を入れない（ファイル・ルールID・1行の要約まで） |
@@ -146,7 +146,7 @@
 | 部品 | 置き場所 | 備考 |
 |---|---|---|
 | 規約テスト | `src/test/java/com/example/authserver/rules/`（`AuthRules`・`AuthRulesTest`・`Violations`） | §3.1 の11ルール。違反は file:line・ルールID・直し方・根拠つき。例外はその行の `rules:allow <ID> <理由>` だけ |
-| **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（40件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
+| **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（v0.4 で 56件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
 | Stop フック | `.claude/hooks/stop_sensors.py`・`.claude/settings.json` | `./mvnw test -Dtest=*RulesTest`。2回まで止める・記録が失われても上限がかかる側へ倒す、は webmailer と同じ |
 | 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`） |
 | `/pre-pr`・`harness-reviewer` | `.claude/skills/pre-pr/`・`.claude/agents/` | 観点は §3.2 に `authz-boundary`・`sensitive-data`・`rule-canary`・`docs-sync` を足した |
@@ -156,8 +156,8 @@
 
 | ルール | 直し方 | 既存の環境への影響 |
 |---|---|---|
-| `secret/noop-encoder`・`secret/hardcoded` | クライアントシークレットは環境変数 `OIDC_CLIENT_SECRET` を `PasswordEncoder` で encode。デモ利用者は `dev` プロファイルで `DEMO_USER_PASSWORD` があるときだけ作る | **`OIDC_CLIENT_SECRET` が必須になった**。既存の `oidc-client` は**同じ id のまま設定を上書き**する（以前は「無ければ作る」だけで、直した設定が既存の DB に効かなかった） |
-| `log/stdout`・`log/sensitive` | SLF4J に。再設定リンクは `PasswordResetNotifier` に渡す（`dev` はログで模擬＝`rules:allow` 理由つき1行、それ以外は送らずリンクも利用者名も出さない） | `dev` 以外では再設定のリンクがどこにも出ない（メール送信は未実装） |
+| `secret/noop-encoder`・`secret/hardcoded` | クライアントシークレットは環境変数 `OIDC_CLIENT_SECRET` を `PasswordEncoder` で encode（**空・32文字未満・`change-me` のままなら起動しない**）。デモ利用者は `dev` プロファイルで `DEMO_USER_PASSWORD` があるときだけ作る（**既にあれば上書き**） | **`OIDC_CLIENT_SECRET`（32文字以上）が必須になった**。既存の `oidc-client` は**同じ id のまま設定を上書き**する（以前は「無ければ作る」だけで、直した設定が既存の DB に効かなかった）。★**以前の版が既存の DB に作った `user`（パスワードは README で公開されていた）は残る**＝本番の DB では削除するかパスワードを変える（dev では起動時に `DEMO_USER_PASSWORD` で上書きされる） |
+| `log/stdout`・`log/sensitive` | SLF4J に。再設定リンクは `PasswordResetNotifier` に渡す（`dev` はログで模擬＝`rules:allow` 理由つき1行、それ以外は送らずリンクも利用者名も出さない） | `dev` 以外では再設定のリンクがどこにも出ない（メール送信は未実装）。リンクの先頭は `APP_BASE_URL`（既定 `http://localhost:8080`＝本番では https の公開 URL を設定する） |
 | `oauth/pkce-required`・`oauth/refresh-rotation` | `requireProofKey(true)`・`reuseRefreshTokens(false)` | クライアントは PKCE（S256）が必須に。リフレッシュするたびに新しいトークン |
 | `web/csrf-disable` | **例外にせず外した**（再設定のフォームは `th:action` で CSRF トークンが入る） | なし（画面からの送信は今までどおり） |
 | `config/prod-defaults` | DEBUG・`show-sql` は `application-dev.properties` へ。`ddl-auto=update` → `validate`（`users` 表を `schema.sql` に足した。テストも `validate` にして、`schema.sql` とエンティティの食い違いを CI で検出） | 本番の起動時に Hibernate が表を変えなくなる。既存の `users` 表（Hibernate が作ったもの）は同じ形 |
@@ -172,8 +172,11 @@
 | `requireProofKey(false)`・`reuseRefreshTokens(true)` | `OidcClientRegistrationTest` と `AuthRulesTest`（`oauth/pkce-required`・`oauth/refresh-rotation`）が落ちる |
 | 既定の通知でリンクをログに出す | `ResetLinkNotLoggedTest` と `AuthRulesTest`（`log/sensitive`）が落ちる |
 | Stop フックの通し（`LoginController` に `System.out`） | 終了コード 2 で `log/stdout` を返し、`.git/harness/events.jsonl` に違反と `stop-block` を記録。直すと 0 |
+| （v0.4）`allowedRedirect` を前方一致に戻す | カナリアの `http://127.0.0.1.attacker.example` と `http://127.0.0.1@evil.example` の2件が落ちる |
 
 ### 7.4 判断表との違い・残り
 
+- （v0.4・レビューの指摘）センサーの見逃しを塞いだ：`redirectUri` を前方一致でなく `URI` で解析（`http://127.0.0.1.attacker.example`・`http://127.0.0.1@evil.example` を通さない）／`csrf((c) -> c.disable())`・`CsrfConfigurer::disable`・複数行の `csrf(...)` と複数行のログ引数／プロパティの `${X:既定値}` に秘密を書く形／YAML の設定ファイル（`config/yaml-unscanned`＝読まないので置かせない）／`dev` 以外のプロファイル（`application-prod.properties` 等）にも既定と同じ規則。それぞれカナリアに見本を足した
+- **既知の見逃し**（字面の限界。誤検知との兼ね合いで残す）：`DEFAULT_PASSWORD = "…"`・`dbPassword = "…"` のような名前の直書き（`ACR_PASSWORD` 定数と区別できない）／`request.getParameter("token")` のように値を取り出してすぐログに渡す形／`log`・`logger` 以外の名前のロガー／同じファイルの2つ目の `RegisteredClient`（PKCE・ローテーションはファイル単位で判定）／Boot のプロパティでクライアントを登録する `spring.security.oauth2.authorizationserver.client.*`。reviewer の観点（`review/sensitive-data` 等）で補う
 - `arch/layer` は ArchUnit を入れず、`import` の字面で判定した（`data` → `web`／`service`、`service` → `web` を禁止）。今の規模（Java 15 ファイル）では依存を1つ増やす理由が弱い。層の規則が増えたら ArchUnit を検討する
 - 残り（§3.2 の観点で、今回は直していないもの）：再設定トークンを平文の in-memory で持つ・署名鍵が起動ごと・`acr` をクラス名で判定・パスキーが in-memory・拒否リストが7語・利用者の列挙の時間差。段階2で、観点ごとに直すかどうかを決める

@@ -1,5 +1,7 @@
 package com.example.authserver.rules;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -34,14 +36,18 @@ final class AuthRules {
             "\\b(redirectUri|postLogoutRedirectUri)\\s*\\(\\s*\"([^\"]*)\"");
     private static final Pattern GRANT = Pattern.compile(
             "AuthorizationGrantType\\.(IMPLICIT|PASSWORD)\\b|new\\s+AuthorizationGrantType\\s*\\(\\s*\"(implicit|password)\"");
+    // 複数行にまたがる書き方もあるので、csrf( を含む行から最大4行をつないで当てる
     private static final Pattern CSRF_OFF = Pattern.compile(
-            "csrf\\s*\\(\\s*\\)\\s*\\.\\s*disable\\s*\\(|csrf\\s*\\(\\s*AbstractHttpConfigurer\\s*::\\s*disable"
-                    + "|csrf\\s*\\(\\s*\\w+\\s*->\\s*\\w+\\s*\\.\\s*disable\\s*\\(|ignoringRequestMatchers\\s*\\(");
+            "csrf\\s*\\(\\s*\\)\\s*\\.\\s*disable\\s*\\("
+                    + "|csrf\\s*\\(\\s*\\w*Configurer\\s*::\\s*disable"
+                    + "|csrf\\s*\\(\\s*\\(?\\s*\\w+\\s*\\)?\\s*->\\s*\\w+\\s*\\.\\s*disable\\s*\\("
+                    + "|ignoringRequestMatchers\\s*\\(");
     private static final Pattern IMPORT = Pattern.compile("^import\\s+com\\.example\\.authserver\\.(\\w+)\\.");
     private static final Pattern DDL = Pattern.compile("^spring\\.jpa\\.hibernate\\.ddl-auto\\s*=\\s*(update|create|create-drop)\\s*$");
     private static final Pattern SHOW_SQL = Pattern.compile("^spring\\.jpa\\.show-sql\\s*=\\s*true\\s*$");
     private static final Pattern LOG_LEVEL = Pattern.compile("(?i)^logging\\.level\\.[^=]*=\\s*(debug|trace)\\s*$");
     private static final Pattern PROP_SECRET = Pattern.compile("(?i)^([^=#]*(password|secret)[^=]*)=(.*)$");
+    private static final Pattern PLACEHOLDER = Pattern.compile("^\\$\\{[^:}]+(:([^}]*))?\\}$");
 
     /** src/main/java の1ファイル。{@code layer} は com.example.authserver の直下のパッケージ名（ルート直下なら ""）。 */
     static void checkJava(Path file, List<String> lines, String layer, Violations v) {
@@ -71,7 +77,7 @@ final class AuthRules {
                         "SLF4J のロガー（LoggerFactory.getLogger）を使う", DOC);
             }
             if (LOG_CALL.matcher(code).find()) {
-                String args = stripStrings(code);
+                String args = stripStrings(joinUntil(lines, i, ";", 5));
                 Matcher m = SENSITIVE_IDENT.matcher(args.substring(firstLogParen(args)));
                 if (m.find()) {
                     v.add(file, n, raw, "log/sensitive", "ログにトークン・パスワード・リンク等を渡している（" + m.group() + "）",
@@ -101,7 +107,8 @@ final class AuthRules {
                 v.add(file, n, raw, "oauth/implicit-password-grant", "implicit／password の grant を使っている",
                         "認可コード＋PKCE を使う（RFC 9700 §2.1.2・§2.4）", DOC);
             }
-            if (CSRF_OFF.matcher(code).find()) {
+            if (code.contains("csrf") && CSRF_OFF.matcher(joinUntil(lines, i, null, 4)).find()
+                    || CSRF_OFF.matcher(code).find()) {
                 v.add(file, n, raw, "web/csrf-disable", "CSRF を無効化／一部の経路を除外している",
                         "フォームは th:action で送れば CSRF トークンが自動で入る。どうしても除外するなら理由を rules:allow に書く", DOC);
             }
@@ -125,7 +132,7 @@ final class AuthRules {
         }
     }
 
-    /** src/main/resources の .properties。{@code defaultProfile} は application.properties（プロファイル無し）のとき true。 */
+    /** src/main/resources の .properties。{@code defaultProfile} は既定と同じ規則を当てるとき true（{@link #strictProfile}）。 */
     static void checkProperties(Path file, List<String> lines, boolean defaultProfile, Violations v) {
         for (int i = 0; i < lines.size(); i++) {
             String raw = lines.get(i);
@@ -137,7 +144,9 @@ final class AuthRules {
             Matcher s = PROP_SECRET.matcher(t);
             if (s.find()) {
                 String value = s.group(3).trim();
-                if (!value.isEmpty() && !(value.startsWith("${") && value.endsWith("}"))) {
+                Matcher ph = PLACEHOLDER.matcher(value);
+                boolean fromEnv = ph.find() && (ph.group(2) == null || ph.group(2).isEmpty()); // ${X} か ${X:}（既定値に秘密を書かない）
+                if (!value.isEmpty() && !fromEnv) {
                     v.add(file, n, raw, "secret/hardcoded", "パスワード・シークレットを設定ファイルに直書きしている",
                             "${環境変数} で受け取る（.env.example に名前だけ書く）", DOC);
                 }
@@ -152,11 +161,51 @@ final class AuthRules {
         }
     }
 
+    /** https か、http の loopback（host が 127.0.0.1 か [::1] に完全一致・userinfo 無し）だけ。前方一致では判定しない。 */
     static boolean allowedRedirect(String uri) {
         if (uri.contains("*")) {
             return false;
         }
-        return uri.startsWith("https://") || uri.startsWith("http://127.0.0.1") || uri.startsWith("http://[::1]");
+        try {
+            URI u = new URI(uri);
+            if (u.getRawUserInfo() != null || u.getHost() == null) {
+                return false;
+            }
+            if ("https".equals(u.getScheme())) {
+                return true;
+            }
+            return "http".equals(u.getScheme()) && ("127.0.0.1".equals(u.getHost()) || "[::1]".equals(u.getHost()));
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+    /** i 行目から、{@code end} を含む行まで（end が null なら max 行まで）をコメントを落としてつなぐ。 */
+    static String joinUntil(List<String> lines, int i, String end, int max) {
+        StringBuilder sb = new StringBuilder();
+        for (int k = i; k < lines.size() && k < i + max; k++) {
+            String c = stripLineComment(lines.get(k));
+            sb.append(c).append(' ');
+            if (end != null && c.contains(end)) {
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    /** src/main/resources のファイル名だけで決まるもの：YAML はセンサーが読まない＝黙ってすり抜けるので使わせない。 */
+    static void checkResourceName(Path file, Violations v) {
+        String name = file.getFileName().toString();
+        if (name.endsWith(".yml") || name.endsWith(".yaml")) {
+            v.add(file, 0, null, "config/yaml-unscanned", "YAML の設定ファイルは規約テストが読まない（すり抜ける）",
+                    ".properties で書く。YAML を使うなら先に AuthRules に YAML の判定を足す", DOC);
+        }
+    }
+
+    /** 既定と同じ規則を当てるか：application.properties と、dev 以外のプロファイル（application-prod 等）。 */
+    static boolean strictProfile(String fileName) {
+        return fileName.startsWith("application") && fileName.endsWith(".properties")
+                && !"application-dev.properties".equals(fileName);
     }
 
     /** 行末の // コメントを落とす（文字列の中の // は残す）。 */

@@ -23,7 +23,7 @@ public class UserConfig {
     }
 
     /**
-     * 開発用のデモ利用者（user）。{@code dev} プロファイルで、環境変数 DEMO_USER_PASSWORD があるときだけ作る。
+     * 開発用のデモ利用者（user）。{@code dev} プロファイルで、環境変数 DEMO_USER_PASSWORD があるときだけ作る（あれば上書き）。
      */
     @Bean
     @Profile("dev")
@@ -34,9 +34,8 @@ public class UserConfig {
                 log.warn("DEMO_USER_PASSWORD is not set; the demo user is not created");
                 return;
             }
-            if (userRepository.findById("user").isEmpty()) {
-                userRepository.save(new User("user", passwordEncoder.encode(demoPassword), true));
-            }
+            // 既にあっても DEMO_USER_PASSWORD で上書きする（以前の版が作った既知のパスワードを残さない）
+            userRepository.save(new User("user", passwordEncoder.encode(demoPassword), true));
         };
     }
 }
