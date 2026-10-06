@@ -1,6 +1,11 @@
 package com.example.authserver.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -43,32 +48,45 @@ import org.springframework.boot.ApplicationRunner;
 @Configuration
 public class AuthorizationServerConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(AuthorizationServerConfig.class);
+
     @Bean
     public RegisteredClientRepository registeredClientRepository(JdbcTemplate jdbcTemplate) {
         return new JdbcRegisteredClientRepository(jdbcTemplate);
     }
 
+    /**
+     * デモ用クライアントを登録する。既にあれば同じ id のまま設定を上書きする（設定を直したら既存の DB にも効かせる）。
+     * シークレットは環境変数 OIDC_CLIENT_SECRET から受け取り、PasswordEncoder で encode して保存する。
+     */
     @Bean
-    public ApplicationRunner clientLoader(RegisteredClientRepository repository) {
+    public ApplicationRunner clientLoader(RegisteredClientRepository repository, PasswordEncoder passwordEncoder,
+            @Value("${app.oidc-client.secret}") String clientSecret) {
         return args -> {
             String clientId = "oidc-client";
-            if (repository.findByClientId(clientId) == null) {
-                RegisteredClient oidcClient = RegisteredClient.withId(UUID.randomUUID().toString())
-                        .clientId(clientId)
-                        .clientSecret("{noop}secret")
-                        .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
-                        .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                        .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
-                        .redirectUri("http://127.0.0.1:8080/login/oauth2/code/oidc-client")
-                        .redirectUri("https://oidcdebugger.com/debug")
-                        .postLogoutRedirectUri("http://127.0.0.1:8080/")
-                        .scope(OidcScopes.OPENID)
-                        .scope(OidcScopes.PROFILE)
-                        .scope("mobile_access")
-                        .clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build())
-                        .build();
-                repository.save(oidcClient);
-            }
+            RegisteredClient existing = repository.findByClientId(clientId);
+            String id = existing != null ? existing.getId() : UUID.randomUUID().toString();
+            RegisteredClient oidcClient = RegisteredClient.withId(id)
+                    .clientId(clientId)
+                    .clientSecret(passwordEncoder.encode(clientSecret))
+                    .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                    .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                    .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+                    .redirectUri("http://127.0.0.1:8080/login/oauth2/code/oidc-client")
+                    .redirectUri("https://oidcdebugger.com/debug")
+                    .postLogoutRedirectUri("http://127.0.0.1:8080/")
+                    .scope(OidcScopes.OPENID)
+                    .scope(OidcScopes.PROFILE)
+                    .scope("mobile_access")
+                    .clientSettings(ClientSettings.builder()
+                            .requireAuthorizationConsent(true)
+                            .requireProofKey(true)          // 機密クライアントも PKCE 必須（RFC 9700 §2.1.1）
+                            .build())
+                    .tokenSettings(TokenSettings.builder()
+                            .reuseRefreshTokens(false)      // 使い回さない＝漏えいの検知（RFC 9700 §4.14）
+                            .build())
+                    .build();
+            repository.save(oidcClient);
         };
     }
 
@@ -124,10 +142,10 @@ public class AuthorizationServerConfig {
         return (context) -> {
             if (OidcParameterNames.ID_TOKEN.equals(context.getTokenType().getValue())) {
                 if (context.getPrincipal().getClass().getName().contains("WebAuthn")) {
-                    System.out.println("Setting ACR to PASSKEY: " + SecurityConstants.ACR_PASSKEY);
+                    log.debug("ACR: passkey");
                     context.getClaims().claim("acr", SecurityConstants.ACR_PASSKEY);
                 } else if (context.getPrincipal() instanceof UsernamePasswordAuthenticationToken) {
-                    System.out.println("Setting ACR to PASSWORD: " + SecurityConstants.ACR_PASSWORD);
+                    log.debug("ACR: password");
                     context.getClaims().claim("acr", SecurityConstants.ACR_PASSWORD);
                 }
             }

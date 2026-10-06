@@ -1,6 +1,7 @@
 package com.example.authserver.service;
 
 import com.example.authserver.data.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -14,11 +15,16 @@ public class PasswordResetTokenService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final PasswordResetNotifier notifier;
+    private final String baseUrl;
     private final Map<String, TokenInfo> tokenStore = new ConcurrentHashMap<>();
 
-    public PasswordResetTokenService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public PasswordResetTokenService(UserRepository userRepository, PasswordEncoder passwordEncoder,
+                                     PasswordResetNotifier notifier, @Value("${app.base-url}") String baseUrl) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.notifier = notifier;
+        this.baseUrl = baseUrl;
     }
 
     public String createToken(String username) {
@@ -29,12 +35,8 @@ public class PasswordResetTokenService {
         String token = UUID.randomUUID().toString();
         tokenStore.put(token, new TokenInfo(username, LocalDateTime.now().plusMinutes(15)));
 
-        // Simulation: Log the email
-        System.out.println("--------------------------------------------------");
-        System.out.println("[Email Simulation] Password Reset Request");
-        System.out.println("To: " + username); // Using username as email for this demo
-        System.out.println("Link: http://localhost:8080/reset-password?token=" + token);
-        System.out.println("--------------------------------------------------");
+        // 届け方は PasswordResetNotifier に任せる（dev はログで模擬・それ以外は送らない）。ここではトークンをログに出さない
+        notifier.send(username, baseUrl + "/reset-password?token=" + token);
 
         return token;
     }

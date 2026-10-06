@@ -17,7 +17,7 @@ This project demonstrates a production-ready OIDC provider implementation with a
   - **Scope-based Refresh Token Expiration**: Tokens with `mobile_access` scope last 30 days; others follow default policy.
   - **NIST-compliant Password Validation**: Checks for length, common passwords, and complexity.
 - **Forgot Password Flow**
-  - Secure email-based password reset simulation (logs output).
+  - Secure email-based password reset simulation (in the `dev` profile the reset link is written to the log; other profiles send nothing until a mail notifier is configured).
   - Token-based verification.
 - **Passkey (WebAuthn) Support**
   - Passwordless login using Touch ID, Face ID, or YubiKey.
@@ -60,10 +60,11 @@ You can use [OIDC Debugger](https://oidcdebugger.com/) to test the authenticatio
 - **Authorize URI**: `http://localhost:8080/oauth2/authorize`
 - **Client ID**: `oidc-client`
 - **Scope**: `openid profile mobile_access` (Add `mobile_access` to test long-lived tokens)
-- **PKCE**: `S256`
+- **PKCE**: `S256` (required — the client is registered with `requireProofKey(true)`)
+- **Client secret**: the value of `OIDC_CLIENT_SECRET`
 
 ### Passkey (WebAuthn)
-1. Log in with default credentials (`user` / `password`).
+1. Run with the `dev` profile and log in as `user` with the password you set in `DEMO_USER_PASSWORD` (see `.env.example`; the demo user is created only in the `dev` profile).
 2. On the Welcome page, click **Register Passkey**.
 3. Log out and use **Sign in with Passkey** on the login screen.
 

@@ -58,10 +58,7 @@ public class SecurityConfig {
                 ).permitAll()
                 .anyRequest().authenticated()
             )
-            .csrf(csrf -> csrf.ignoringRequestMatchers(
-                SecurityConstants.FORGOT_PASSWORD_PREFIX, 
-                SecurityConstants.RESET_PASSWORD_PREFIX
-            ))
+            // CSRF は全経路で有効（再設定のフォームも th:action でトークンが入る）
             // Form login handles the redirect to the login page from the
             // authorization server filter chain
             .formLogin(form -> form
