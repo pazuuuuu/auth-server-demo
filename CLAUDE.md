@@ -19,12 +19,26 @@ Spring Authorization Server で作る **OIDC プロバイダの実装例**（認
 |---|---|---|
 | 言語 | Java 17 | |
 | フレームワーク | Spring Boot 3.4・Spring Security・Spring Authorization Server・Thymeleaf | |
-| DB | PostgreSQL（Supabase）。テストは H2（`src/test/resources/application.properties`） | 資格情報は環境変数（`.env.example`）。**`.env` はコミットしない** |
+| DB | PostgreSQL（Supabase）。テストは H2（`src/test/resources/application.properties`） | 資格情報は環境変数（`.env.example`）。**`.env` はコミットしない**。表は `schema.sql` で作り、Hibernate は `validate` だけ |
+| プロファイル | 既定＝本番向け／`dev`＝DEBUG ログ・デモ利用者・再設定リンクをログに出す | 開発向けの設定は `application-dev.properties` へ（既定に置くと `config/prod-defaults` で落ちる） |
 | ビルド | Maven Wrapper（`./mvnw verify`） | CI も同じコマンド |
 
 ## ハーネス（ガイドとセンサー）
 
-全体像・判断の理由は `docs/harness.md`（v0.2＝段階0・判断済み。Q1〜Q3 とも案A）。段階1でセンサーを入れるまでは、次をガイドとして守る：
+全体像・判断の理由は `docs/harness.md`（v0.3＝段階1・センサーを導入。Q1〜Q3 とも案A）。
+
+| | 計算系（決定的・速い） | 推論系（LLM の判断） |
+|---|---|---|
+| **ガイド** | `.claude/settings.json` のフック | 本ファイル・`docs/harness.md`・`/pre-pr` スキル |
+| **センサー** | 規約テスト `AuthRulesTest`・カナリア `CanaryRulesTest`・`./mvnw verify` の全テスト・**CI**（PR と main への push） | `harness-reviewer` サブエージェント（読み取り専用） |
+
+- **Stop フック**：`src/`・`pom.xml` に未コミットの変更か main に無いコミットがあると、ターンを終える前に `./mvnw test -Dtest=*RulesTest` を流す。落ちたら**違反と直し方が返ってくるので、そのまま直す**。止めるのは2回まで
+- **PR の前は `/pre-pr`**：`./mvnw verify` → `harness-reviewer` → docs の同期
+- **CI**：指摘と結果は毎回アーティファクト `harness-events` に残る（main への push の失敗＝`main-red`）
+- 規約テストの例外は、その行に `rules:allow <ルールID> <理由>` を書いたときだけ（理由なしは違反）。テストを消す・無効にするで緑にしない
+- 規約を足したら、字面で判定できるものは `AuthRules` へ（**`CanaryRulesTest` に見本も足す**）、判断が要るものは `harness-reviewer` の観点へ
+
+守ること（規約の中身。§3.1 はセンサーが見張る）：
 
 - **秘密情報**：パスワード・クライアントシークレットを `src/main` に直書きしない。`{noop}` を使わず `PasswordEncoder` を通す
 - **ログ**：`System.out` を使わずロガーを使う。トークン・パスワード・再設定リンクをログに出さない

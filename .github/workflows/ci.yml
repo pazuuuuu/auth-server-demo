@@ -1,6 +1,9 @@
 # CI: build and test on every pull request and every push to main.
 # Tests run against an in-memory H2 database (src/test/resources/application.properties),
 # so no Supabase credentials or secrets are needed here.
+# The auth rule sensors (AuthRulesTest / CanaryRulesTest, docs/harness.md §3.1) run as part of verify.
+# Every run also uploads the harness events (findings + the CI result; a red push to main is "main-red")
+# as the artifact harness-events (docs/harness.md §2).
 name: CI
 
 on:
@@ -30,6 +33,20 @@ jobs:
 
       - name: Build and test
         run: ./mvnw -B -ntp verify
+
+      - name: Collect harness events (findings + CI result)
+        if: always()
+        env:
+          HARNESS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 .claude/hooks/harness_events.py ci --status ${{ job.status }}
+
+      - name: Upload harness events (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-events
+          path: target/harness/events/ci.jsonl
+          retention-days: 30
 
       - name: Upload test reports (on failure)
         if: failure()

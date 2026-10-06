@@ -1,6 +1,6 @@
 # ハーネス設計（ガイドとセンサー）
 
-> 版 v0.2（段階0・判断済み）／2026-10-06
+> 版 v0.3（段階1・センサーを導入）／2026-10-06
 > 元になった仕組み：`pazuuuuu/webmailer` の `docs/webmailer-harness.html`（§10 記録と自己改善ループ）。
 > 持っていき方は利用者判断で **案A＝共通部分をコピーし、認証・認可の規約は作り直す**（2026-10-06）。
 
@@ -86,8 +86,8 @@
 
 | 段階 | 中身 | 状態 |
 |---|---|---|
-| 0 | `CLAUDE.md`・本書（規約の洗い出し・判断表） | **本 PR** |
-| 1 | 規約テスト（§3.1 の採用分）・Stop フック・事象の口・CI の事象・`/pre-pr`・`harness-reviewer`（§3.2）。今の違反は §6 Q1 の判断どおりに扱う。**入れたルールは1回わざと破って落ちることを確かめる** | 未 |
+| 0 | `CLAUDE.md`・本書（規約の洗い出し・判断表） | 済（PR#3） |
+| 1 | 規約テスト（§3.1 の採用分）・Stop フック・事象の口・CI の事象・`/pre-pr`・`harness-reviewer`（§3.2）。今の違反は §6 Q1 の判断どおりに扱う。**入れたルールは1回わざと破って落ちることを確かめる** | **済**（§7） |
 | 2 | テストの土台：MockMvc で CSRF・PKCE 必須・再設定トークンの一回限り／期限切れ・利用者の列挙が漏れないこと、など「しないこと」のテスト | 未 |
 | 3 | 収集ルーチン・分析（webmailer の段階2と共通にできるか見る） | 未 |
 
@@ -138,3 +138,42 @@
 - **案B：入れる（`docs/design-<名前>.md` を先に作る、を規約にする）**
   - メリット：webmailer と同じ型になる
   - デメリット：小さな変更にも設計書の手間がかかる
+
+## 7. 段階1の as-built（v0.3）
+
+### 7.1 入れたもの
+
+| 部品 | 置き場所 | 備考 |
+|---|---|---|
+| 規約テスト | `src/test/java/com/example/authserver/rules/`（`AuthRules`・`AuthRulesTest`・`Violations`） | §3.1 の11ルール。違反は file:line・ルールID・直し方・根拠つき。例外はその行の `rules:allow <ID> <理由>` だけ |
+| **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（40件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
+| Stop フック | `.claude/hooks/stop_sensors.py`・`.claude/settings.json` | `./mvnw test -Dtest=*RulesTest`。2回まで止める・記録が失われても上限がかかる側へ倒す、は webmailer と同じ |
+| 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`） |
+| `/pre-pr`・`harness-reviewer` | `.claude/skills/pre-pr/`・`.claude/agents/` | 観点は §3.2 に `authz-boundary`・`sensitive-data`・`rule-canary`・`docs-sync` を足した |
+| 守りのテスト | `OidcClientRegistrationTest`・`PasswordResetFlowTest`・`ResetLinkNotLoggedTest` | 「しないこと」：CSRF トークンが無ければ送らない／変えない、存在しない利用者には送らない、トークンは一度しか使えない、知らないトークンでは変えない、既定のプロファイルでリンクも利用者名もログに出さない |
+
+### 7.2 今の違反の直し方（Q1＝案A）
+
+| ルール | 直し方 | 既存の環境への影響 |
+|---|---|---|
+| `secret/noop-encoder`・`secret/hardcoded` | クライアントシークレットは環境変数 `OIDC_CLIENT_SECRET` を `PasswordEncoder` で encode。デモ利用者は `dev` プロファイルで `DEMO_USER_PASSWORD` があるときだけ作る | **`OIDC_CLIENT_SECRET` が必須になった**。既存の `oidc-client` は**同じ id のまま設定を上書き**する（以前は「無ければ作る」だけで、直した設定が既存の DB に効かなかった） |
+| `log/stdout`・`log/sensitive` | SLF4J に。再設定リンクは `PasswordResetNotifier` に渡す（`dev` はログで模擬＝`rules:allow` 理由つき1行、それ以外は送らずリンクも利用者名も出さない） | `dev` 以外では再設定のリンクがどこにも出ない（メール送信は未実装） |
+| `oauth/pkce-required`・`oauth/refresh-rotation` | `requireProofKey(true)`・`reuseRefreshTokens(false)` | クライアントは PKCE（S256）が必須に。リフレッシュするたびに新しいトークン |
+| `web/csrf-disable` | **例外にせず外した**（再設定のフォームは `th:action` で CSRF トークンが入る） | なし（画面からの送信は今までどおり） |
+| `config/prod-defaults` | DEBUG・`show-sql` は `application-dev.properties` へ。`ddl-auto=update` → `validate`（`users` 表を `schema.sql` に足した。テストも `validate` にして、`schema.sql` とエンティティの食い違いを CI で検出） | 本番の起動時に Hibernate が表を変えなくなる。既存の `users` 表（Hibernate が作ったもの）は同じ形 |
+
+### 7.3 わざと破って確かめたこと
+
+| 壊したもの | 結果 |
+|---|---|
+| 今のツリー（直す前） | `AuthRulesTest` が 18 件で落ちる（棚卸しの件数＋デモ利用者のパスワードの直書き1件） |
+| CSRF の除外を戻す | `PasswordResetFlowTest` の CSRF の2件が落ちる |
+| 再設定後にトークンを消さない | 「トークンは一度しか使えない」が落ちる |
+| `requireProofKey(false)`・`reuseRefreshTokens(true)` | `OidcClientRegistrationTest` と `AuthRulesTest`（`oauth/pkce-required`・`oauth/refresh-rotation`）が落ちる |
+| 既定の通知でリンクをログに出す | `ResetLinkNotLoggedTest` と `AuthRulesTest`（`log/sensitive`）が落ちる |
+| Stop フックの通し（`LoginController` に `System.out`） | 終了コード 2 で `log/stdout` を返し、`.git/harness/events.jsonl` に違反と `stop-block` を記録。直すと 0 |
+
+### 7.4 判断表との違い・残り
+
+- `arch/layer` は ArchUnit を入れず、`import` の字面で判定した（`data` → `web`／`service`、`service` → `web` を禁止）。今の規模（Java 15 ファイル）では依存を1つ増やす理由が弱い。層の規則が増えたら ArchUnit を検討する
+- 残り（§3.2 の観点で、今回は直していないもの）：再設定トークンを平文の in-memory で持つ・署名鍵が起動ごと・`acr` をクラス名で判定・パスキーが in-memory・拒否リストが7語・利用者の列挙の時間差。段階2で、観点ごとに直すかどうかを決める
