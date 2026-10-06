@@ -1,3 +1,11 @@
+-- 利用者（com.example.authserver.data.User）。以前は Hibernate の ddl-auto=update で作っていた
+CREATE TABLE IF NOT EXISTS users (
+    username varchar(255) NOT NULL,
+    password varchar(255),
+    enabled boolean NOT NULL,
+    PRIMARY KEY (username)
+);
+
 CREATE TABLE IF NOT EXISTS oauth2_registered_client (
     id varchar(100) NOT NULL,
     client_id varchar(100) NOT NULL,

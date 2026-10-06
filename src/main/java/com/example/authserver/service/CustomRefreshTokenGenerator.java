@@ -4,6 +4,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.springframework.security.oauth2.core.OAuth2RefreshToken;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenContext;
@@ -11,6 +14,8 @@ import org.springframework.security.oauth2.server.authorization.token.OAuth2Toke
 import org.springframework.stereotype.Service;
 
 public class CustomRefreshTokenGenerator implements OAuth2TokenGenerator<OAuth2RefreshToken> {
+
+    private static final Logger log = LoggerFactory.getLogger(CustomRefreshTokenGenerator.class);
 
     @Override
     public OAuth2RefreshToken generate(OAuth2TokenContext context) {
@@ -26,7 +31,7 @@ public class CustomRefreshTokenGenerator implements OAuth2TokenGenerator<OAuth2R
         }
         
         Instant expiresAt = issuedAt.plus(timeToLive);
-        System.out.println("Generating Refresh Token. Scopes: " + context.getAuthorizedScopes() + ", TTL: " + timeToLive + ", ExpiresAt: " + expiresAt);
+        log.debug("refresh TTL {} (scopes {})", timeToLive, context.getAuthorizedScopes());
         return new OAuth2RefreshToken(UUID.randomUUID().toString(), issuedAt, expiresAt);
     }
 }
