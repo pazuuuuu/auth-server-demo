@@ -66,3 +66,37 @@ CREATE TABLE IF NOT EXISTS oauth2_authorization_consent (
     authorities varchar(1000) NOT NULL,
     PRIMARY KEY (registered_client_id, principal_name)
 );
+
+-- パスワード再設定トークン（PasswordResetTokenRepository）。トークンそのものではなく SHA-256 のハッシュを置く（docs/SLO.md §7）
+CREATE TABLE IF NOT EXISTS password_reset_token (
+    token_hash varchar(64) NOT NULL,
+    username varchar(255) NOT NULL,
+    expires_at timestamp NOT NULL,
+    PRIMARY KEY (token_hash)
+);
+
+-- パスキー（JdbcPublicKeyCredentialUserEntityRepository・JdbcUserCredentialRepository）。Spring Security 6.5 の標準スキーマと同じ形
+CREATE TABLE IF NOT EXISTS user_entities (
+    id varchar(1000) NOT NULL,
+    name varchar(100) NOT NULL,
+    display_name varchar(200),
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS user_credentials (
+    credential_id varchar(1000) NOT NULL,
+    user_entity_user_id varchar(1000) NOT NULL,
+    public_key bytea NOT NULL,
+    signature_count bigint,
+    uv_initialized boolean,
+    backup_eligible boolean NOT NULL,
+    authenticator_transports varchar(1000),
+    public_key_credential_type varchar(100),
+    backup_state boolean NOT NULL,
+    attestation_object bytea,
+    attestation_client_data_json bytea,
+    created timestamp,
+    last_used timestamp,
+    label varchar(1000) NOT NULL,
+    PRIMARY KEY (credential_id)
+);

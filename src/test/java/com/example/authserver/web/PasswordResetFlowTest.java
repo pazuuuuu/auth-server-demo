@@ -9,15 +9,24 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -42,6 +51,9 @@ class PasswordResetFlowTest {
 
     @Autowired
     PasswordEncoder encoder;
+
+    @Autowired
+    JdbcTemplate jdbc;
 
     @MockitoBean
     PasswordResetNotifier notifier;
@@ -95,6 +107,51 @@ class PasswordResetFlowTest {
         mvc.perform(resetWith("not-a-token", NEW)).andExpect(redirectedUrl("/login?error=invalid_token"));
 
         assertThat(encoder.matches(OLD, password())).isTrue();
+    }
+
+    @Test
+    void 期限切れのトークンでは変えない() throws Exception {
+        String token = "expired-token-for-test";
+        jdbc.update("INSERT INTO password_reset_token (token_hash, username, expires_at) VALUES (?, ?, ?)",
+                sha256(token), "alice", Timestamp.from(Instant.now().minusSeconds(60)));
+
+        mvc.perform(resetWith(token, NEW)).andExpect(redirectedUrl("/login?error=invalid_token"));
+
+        assertThat(encoder.matches(OLD, password())).isTrue();
+    }
+
+    @Test
+    void DBにはトークンそのものを置かずハッシュだけを置く() throws Exception {
+        String token = requestToken();
+
+        List<String> hashes = jdbc.queryForList(
+                "SELECT token_hash FROM password_reset_token WHERE username = ?", String.class, "alice");
+
+        assertThat(hashes).containsExactly(sha256(token)).doesNotContain(token);
+    }
+
+    @Test
+    void 新しいリンクを送ると前のリンクでは変えない() throws Exception {
+        mvc.perform(post("/forgot-password").param("username", "alice").with(csrf()));
+        mvc.perform(post("/forgot-password").param("username", "alice").with(csrf()));
+        ArgumentCaptor<String> link = ArgumentCaptor.forClass(String.class);
+        verify(notifier, times(2)).send(eq("alice"), link.capture());
+        String first = tokenOf(link.getAllValues().get(0));
+        String second = tokenOf(link.getAllValues().get(1));
+
+        mvc.perform(resetWith(first, NEW)).andExpect(redirectedUrl("/login?error=invalid_token"));
+        assertThat(encoder.matches(OLD, password())).isTrue();
+
+        mvc.perform(resetWith(second, NEW)).andExpect(redirectedUrl("/reset-password/success"));
+        assertThat(encoder.matches(NEW, password())).isTrue();
+    }
+
+    private static String tokenOf(String link) {
+        return link.substring(link.indexOf("token=") + "token=".length());
+    }
+
+    private static String sha256(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
     }
 
     private String requestToken() throws Exception {
