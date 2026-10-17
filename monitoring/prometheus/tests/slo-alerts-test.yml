@@ -1,0 +1,114 @@
+# Prometheus のルールの単体テスト（promtool test rules）。SLO の値やアラートの条件を変えたら、ここが落ちて気づける（docs/SLO.md §4.1）。
+rule_files:
+  - ../slo-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # トークンエンドポイントの 10% が 5xx（SLO-4a 99.95% のバジェットの 200 倍の速さ）→ 呼び出しのアラート
+  - interval: 1m
+    input_series:
+      - series: 'authserver_http_requests_seconds_count{endpoint="token",status_class="2xx"}'
+        values: '0+90x120'
+      - series: 'authserver_http_requests_seconds_count{endpoint="token",status_class="5xx"}'
+        values: '0+10x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: AuthServerTokenAvailability
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sloth_severity: page
+              category: availability
+              owner: auth-server-demo
+              slo_id: SLO-4a
+              sloth_id: auth-server-token-availability
+              sloth_service: auth-server
+              sloth_slo: token-availability
+            exp_annotations:
+              summary: SLO-4a のエラーバジェットを想定より速く消費している
+              runbook: docs/SLO.md §4
+              title: (page) auth-server token-availability SLO error budget burn rate is too fast.
+          - exp_labels:
+              severity: ticket
+              sloth_severity: ticket
+              category: availability
+              owner: auth-server-demo
+              slo_id: SLO-4a
+              sloth_id: auth-server-token-availability
+              sloth_service: auth-server
+              sloth_slo: token-availability
+            exp_annotations:
+              summary: SLO-4a のエラーバジェットを想定より速く消費している
+              runbook: docs/SLO.md §4
+              title: (ticket) auth-server token-availability SLO error budget burn rate is too fast.
+
+  # 4xx（invalid_grant 等）は正しく断った要求＝良いイベント。どれだけ多くてもアラートにしない（docs/SLO.md §2.1）
+  - interval: 1m
+    input_series:
+      - series: 'authserver_http_requests_seconds_count{endpoint="token",status_class="2xx"}'
+        values: '0+50x120'
+      - series: 'authserver_http_requests_seconds_count{endpoint="token",status_class="4xx"}'
+        values: '0+50x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: AuthServerTokenAvailability
+        exp_alerts: []
+
+  # 5xx が SLO の範囲（99.95% → 0.05%）に収まっていれば鳴らさない：0.01%
+  - interval: 1m
+    input_series:
+      - series: 'authserver_http_requests_seconds_count{endpoint="token",status_class="2xx"}'
+        values: '0+9999x120'
+      - series: 'authserver_http_requests_seconds_count{endpoint="token",status_class="5xx"}'
+        values: '0+1x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: AuthServerTokenAvailability
+        exp_alerts: []
+
+  # ログインの 30% が 1,000 ms を超える（SLO-1b 99% のバジェットの 30 倍）→ 遅延のアラート（呼び出し）
+  - interval: 1m
+    input_series:
+      - series: 'authserver_http_requests_seconds_count{endpoint="login",status_class="3xx"}'
+        values: '0+100x120'
+      - series: 'authserver_http_requests_seconds_bucket{endpoint="login",status_class="3xx",le="0.3"}'
+        values: '0+20x120'
+      - series: 'authserver_http_requests_seconds_bucket{endpoint="login",status_class="3xx",le="1.0"}'
+        values: '0+70x120'
+      - series: 'authserver_http_requests_seconds_bucket{endpoint="login",status_class="3xx",le="+Inf"}'
+        values: '0+100x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: AuthServerLoginLatency
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sloth_severity: page
+              category: latency
+              owner: auth-server-demo
+              slo_id: SLO-1b
+              sloth_id: auth-server-login-latency
+              sloth_service: auth-server
+              sloth_slo: login-latency
+            exp_annotations:
+              summary: SLO-1b のエラーバジェットを想定より速く消費している
+              runbook: docs/SLO.md §4
+              title: (page) auth-server login-latency SLO error budget burn rate is too fast.
+          - exp_labels:
+              severity: ticket
+              sloth_severity: ticket
+              category: latency
+              owner: auth-server-demo
+              slo_id: SLO-1b
+              sloth_id: auth-server-login-latency
+              sloth_service: auth-server
+              sloth_slo: login-latency
+            exp_annotations:
+              summary: SLO-1b のエラーバジェットを想定より速く消費している
+              runbook: docs/SLO.md §4
+              title: (ticket) auth-server login-latency SLO error budget burn rate is too fast.
+      # 同じ時間、トークンの遅延のアラートは鳴らない（エンドポイントで分けて数えている）
+      - eval_time: 90m
+        alertname: AuthServerTokenLatency
+        exp_alerts: []

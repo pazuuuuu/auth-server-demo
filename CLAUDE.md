@@ -12,7 +12,7 @@ Spring Authorization Server で作る **OIDC プロバイダの実装例**（認
 設計・方針は口頭ではなく **`docs/` と本ファイルに書かれたものが正**。判断が変わったら、コードだけでなく該当ドキュメントも更新する。
 
 - `docs/harness.md` — ハーネス（ガイドとセンサー）の設計・規約の洗い出し・判断表
-- `docs/SLO.md` — SLI・SLO・エラーバジェットの運用ルール（v0.2＝計測は未実装・値は仮。§7 の再起動で失われる状態を修正。2026-10-17 利用者判断：署名鍵は環境変数の PEM、パスキーは 6.4 のまま JDBC 版を自作）
+- `docs/SLO.md` — SLI・SLO・エラーバジェットの運用ルール（v0.3＝計測とアラートを実装・値は仮）。判断：2026-10-17 案A（docs から）→ §7 署名鍵は環境変数の PEM・パスキーは 6.4 のまま自作 → §6 管理用エンドポイントは別ポート・SLO の定義は Sloth で生成。SLO の値を変えるときは `monitoring/sloth/authserver.yml` を直して `monitoring/generate.sh`
 
 ## 技術スタック
 
@@ -23,6 +23,7 @@ Spring Authorization Server で作る **OIDC プロバイダの実装例**（認
 | DB | PostgreSQL（Supabase）。テストは H2（`src/test/resources/application.properties`） | 資格情報は環境変数（`.env.example`）。**`.env` はコミットしない**。表は `schema.sql` で作り、Hibernate は `validate` だけ |
 | プロファイル | 既定＝本番向け／`dev`＝DEBUG ログ・デモ利用者・再設定リンクをログに出す | 開発向けの設定は `application-dev.properties` へ（既定に置くと `config/prod-defaults` で落ちる） |
 | ビルド | Maven Wrapper（`./mvnw verify`） | CI も同じコマンド |
+| 計測 | Actuator・Micrometer（Prometheus）・Sloth・promtool | `/actuator/prometheus` は管理用ポート（8081）だけ。外に出さない。SLO のルールは生成物（`monitoring/`）で、CI の `slo-rules` ジョブが食い違いを落とす |
 
 ## ハーネス（ガイドとセンサー）
 
