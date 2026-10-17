@@ -48,6 +48,11 @@ final class AuthRules {
     private static final Pattern LOG_LEVEL = Pattern.compile("(?i)^logging\\.level\\.[^=]*=\\s*(debug|trace)\\s*$");
     private static final Pattern PROP_SECRET = Pattern.compile("(?i)^([^=#]*(password|secret)[^=]*)=(.*)$");
     private static final Pattern PLACEHOLDER = Pattern.compile("^\\$\\{[^:}]+(:([^}]*))?\\}$");
+    private static final Pattern MGMT_EXPOSURE = Pattern.compile("^management\\.endpoints\\.web\\.exposure\\.include\\s*=(.*)$");
+    private static final Pattern MGMT_DETAILS = Pattern.compile("^management\\.endpoint\\.health\\.show-(details|components)\\s*=\\s*(\\S*)\\s*$");
+    private static final Pattern MGMT_PORT = Pattern.compile("^management\\.server\\.port\\s*=\\s*\\S+");
+    private static final java.util.Set<String> MGMT_ALLOWED = java.util.Set.of("health", "prometheus");
+    private static final String SLO_DOC = "docs/SLO.md §6.1";
 
     /** src/main/java の1ファイル。{@code layer} は com.example.authserver の直下のパッケージ名（ルート直下なら ""）。 */
     static void checkJava(Path file, List<String> lines, String layer, Violations v) {
@@ -154,11 +159,37 @@ final class AuthRules {
             if (!defaultProfile) {
                 continue;
             }
+            Matcher ex = MGMT_EXPOSURE.matcher(t);
+            if (ex.find()) {
+                for (String item : ex.group(1).split(",")) {
+                    if (!MGMT_ALLOWED.contains(item.trim())) {
+                        v.add(file, n, raw, "config/management-exposure", "health・prometheus 以外の actuator を公開している（" + item.trim() + "）",
+                                "exposure.include は health,prometheus だけにする（env・beans・heapdump 等は資格情報や内部情報が出る）", SLO_DOC);
+                        break;
+                    }
+                }
+            }
+            Matcher det = MGMT_DETAILS.matcher(t);
+            if (det.find() && !"never".equals(det.group(2))) {
+                v.add(file, n, raw, "config/management-exposure", "health の詳細（DB 等の部品の状態）を出している",
+                        "show-details・show-components は never にする", SLO_DOC);
+            }
             if (DDL.matcher(t).find() || SHOW_SQL.matcher(t).find() || LOG_LEVEL.matcher(t).find()) {
                 v.add(file, n, raw, "config/prod-defaults", "既定のプロファイルに開発向けの設定がある",
                         "ddl-auto は validate／none、show-sql と DEBUG は application-dev.properties へ", DOC);
             }
         }
+    }
+
+    /** 既定の application.properties：actuator を利用者向けのポートに出さないよう、管理用ポートを必ず分けて書く（docs/SLO.md §6.1）。 */
+    static void checkManagementPort(Path file, List<String> lines, Violations v) {
+        for (String raw : lines) {
+            if (MGMT_PORT.matcher(raw.trim()).find()) {
+                return;
+            }
+        }
+        v.add(file, 0, null, "config/management-port", "management.server.port が無い＝actuator が利用者向けのポートに出る",
+                "management.server.port=${MANAGEMENT_PORT:8081} を書き、そのポートは外に出さない", SLO_DOC);
     }
 
     /** https か、http の loopback（host が 127.0.0.1 か [::1] に完全一致・userinfo 無し）だけ。前方一致では判定しない。 */

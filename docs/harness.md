@@ -1,6 +1,6 @@
 # ハーネス設計（ガイドとセンサー）
 
-> 版 v0.5（再起動で失われる状態を修正・`docs/SLO.md` §7 v0.2）／2026-10-17
+> 版 v0.6（計測の規約を追加・`docs/SLO.md` §6 v0.3）／2026-10-17
 > 元になった仕組み：`pazuuuuu/webmailer` の `docs/webmailer-harness.html`（§10 記録と自己改善ループ）。
 > 持っていき方は利用者判断で **案A＝共通部分をコピーし、認証・認可の規約は作り直す**（2026-10-06）。
 
@@ -57,6 +57,8 @@
 | `oauth/implicit-password-grant` | `IMPLICIT`・`PASSWORD` の grant を使わない | RFC 9700 §2.1.2・§2.4 | 0 | 文字列 |
 | `web/csrf-disable` | `csrf().disable()`・`csrf(AbstractHttpConfigurer::disable)` を使わない。`ignoringRequestMatchers` は `rules:allow` と理由が要る | CSRF | **1**（再設定2経路を除外） | 文字列 |
 | `config/prod-defaults` | 既定の `application.properties` で `spring.jpa.hibernate.ddl-auto=update`・`show-sql=true`・security の `DEBUG` を使わない（開発用プロファイルへ） | 本番で意図せずスキーマ変更・ログに資格情報 | **4**（DEBUG 2行・ddl-auto・show-sql） | プロパティ |
+| `config/management-exposure` | （v0.6）既定・`dev` 以外の properties で、actuator の公開は `health`・`prometheus` だけ。health の `show-details`・`show-components` は `never` | env・beans・heapdump 等から資格情報や内部情報が出る（`docs/SLO.md` §6.1） | 0 | プロパティ |
+| `config/management-port` | （v0.6）既定の `application.properties` に `management.server.port` を書く（actuator を利用者向けのポートに出さない）。実行時も、管理用ポートが無い・同じなら起動しない（`MetricsConfig`） | 同上 | 0 | プロパティ（ファイル単位） |
 | `arch/layer` | `web` → `service` → `data` の向きを守る（`data` が `web` を見ない等） | 層の分離 | 0 | ArchUnit 候補 |
 
 ### 3.2 推論系（判断が要る）→ `harness-reviewer` の観点
@@ -78,7 +80,7 @@
 | 問い | 案 | 推奨 | 理由 |
 |---|---|---|---|
 | 規約テストの書き方 | A 文字列とプロパティのテスト（webmailer と同じ自前の `Violations`）／B ArchUnit／C 両方 | **C** | §3.1 の大半は字面（設定のメソッド呼び出し・プロパティ）＝A が素直で、直し方つきのメッセージも出しやすい。層の向き（`arch/layer`）だけ ArchUnit が向く。依存（`archunit-junit5`）が1つ増える |
-| CI 赤のマージ禁止 | A ブランチ保護（必須チェック `build`・最新の main を取り込み済み）／B 運用 | **A** | public なので無料で効く。webmailer で運用にした理由（費用）が無い。設定は GitHub の画面で利用者が行う（§6 Q2） |
+| CI 赤のマージ禁止 | A ブランチ保護（必須チェック `build`・最新の main を取り込み済み）／B 運用 | **A** | public なので無料で効く。webmailer で運用にした理由（費用）が無い。設定は GitHub の画面で利用者が行う（§6 Q2）。（v0.6）`slo-rules` ジョブ（SLO のルールの食い違い・文法・単体テスト。`docs/SLO.md` §6.2）も必須チェックに足す（利用者の設定待ち） |
 | マージキュー | — | 使わない見込み | 組織が持つリポジトリ向けの機能。個人のリポジトリでは使えない見込み（要確認）。「最新の main を取り込み済み」を必須にして古い main で緑の問題を受ける |
 | 記録の置き場所 | webmailer と同じ孤立ブランチ `harness-data` | 同じ | 公開されるので、事象は要約とルールIDまでにする（§1） |
 
@@ -173,6 +175,9 @@
 | `requireProofKey(false)`・`reuseRefreshTokens(true)` | `OidcClientRegistrationTest` と `AuthRulesTest`（`oauth/pkce-required`・`oauth/refresh-rotation`）が落ちる |
 | 既定の通知でリンクをログに出す | `ResetLinkNotLoggedTest` と `AuthRulesTest`（`log/sensitive`）が落ちる |
 | Stop フックの通し（`LoginController` に `System.out`） | 終了コード 2 で `log/stdout` を返し、`.git/harness/events.jsonl` に違反と `stop-block` を記録。直すと 0 |
+| （v0.6）本番の `application.properties` から `management.server.port` を消す／`exposure.include=*` にする | `AuthRulesTest` が落ちる（`config/management-port`／`config/management-exposure`）。`ManagementEndpointTest` はテスト用の設定で動くので、本番の設定はこちらで見張る |
+| （v0.6）`SliMetricsFilter` の `int status = 500` を `200` にする | `SliMetricsFilterTest` の「途中で例外が出た要求は5xxとして数え…」が落ちる |
+| （v0.6）`MetricsConfig` のフィルタの順序を `0`（Spring Security の後ろ）にする | `ManagementEndpointTest` の「管理用ポートでSLIの指標を取れる」が落ちる（jwks を数えられない） |
 | （v0.5）`PasswordResetTokenRepository#consume` の `== 1` を `>= 0` に変える | `PasswordResetTokenRepositoryTest` の「一度しか消費できない」と「期限切れは消費できない」が落ちる |
 | （v0.4）`allowedRedirect` を前方一致に戻す | カナリアの `http://127.0.0.1.attacker.example` と `http://127.0.0.1@evil.example` の2件が落ちる |
 

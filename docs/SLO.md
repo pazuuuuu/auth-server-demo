@@ -26,7 +26,7 @@
 |---|---|---|---|
 | `CUJ-1` | パスワードでログインする | エンドユーザー | `POST /login` |
 | `CUJ-2` | パスキーでログインする | エンドユーザー | `POST /webauthn/authenticate/options` → `POST /login/webauthn` |
-| `CUJ-3` | RP が認可コードを受け取る | RP・エンドユーザー | `GET /oauth2/authorize`（ログイン済み・同意済みのとき） |
+| `CUJ-3` | RP が認可コードを受け取る | RP・エンドユーザー | `GET /oauth2/authorize`・`POST /oauth2/authorize`（同意の送信） |
 | `CUJ-4` | RP がトークンを受け取る・更新する | RP | `POST /oauth2/token`（`authorization_code`・`refresh_token`） |
 | `CUJ-5` | RP が設定と検証鍵を取得する | RP（ID トークンの検証） | `GET /.well-known/openid-configuration`・`GET /oauth2/jwks` |
 | `CUJ-6` | パスワードを再設定する | エンドユーザー | `POST /forgot-password`・`POST /reset-password` |
@@ -41,7 +41,7 @@
 - **利用者の誤りはサービスの失敗に数えない**：パスワード違い（`/login?error` への 302）、期限切れの再設定トークン、`invalid_grant`・`invalid_client` などの 4xx は「サービスが正しく断った」ので**良いイベント**に含める。
   - ただし 4xx の急増（例：全 RP で `invalid_client`）は設定事故の兆候なので、SLO とは別に監視する。
 - **有効なイベントから除く**もの：ヘルスチェック、明らかなボット・スキャン（未登録の `client_id`）、計画メンテナンス中の要求。
-- **計測点**は、サーバーではなくロードバランサー（またはクライアント）に近いほうがよい（SRE Workbook「Implementing SLOs」）。いまは LB が無いので、計測を入れる段階ではアプリの HTTP メトリクスから始め、LB を置いたら移す。
+- **計測点**は、サーバーではなくロードバランサー（またはクライアント）に近いほうがよい（SRE Workbook「Implementing SLOs」）。いまは LB が無いので、アプリの中（§6.1）で数えている。LB を置いたら移す。
 
 ### 2.2 SLI 一覧
 
@@ -50,7 +50,7 @@
 | `SLI-1a` | CUJ-1 | 可用性 | 5xx 以外で応答した `POST /login` | `POST /login` 全件 |
 | `SLI-1b` | CUJ-1 | レイテンシ | 1,000 ms 以内に応答した `POST /login` | 同上 |
 | `SLI-2` | CUJ-2 | 可用性 | 5xx 以外で応答したパスキー認証の2要求 | パスキー認証の要求全件 |
-| `SLI-3` | CUJ-3 | 可用性 | 5xx 以外で応答した `GET /oauth2/authorize` | 同エンドポイント全件 |
+| `SLI-3` | CUJ-3 | 可用性 | 5xx 以外で応答した `/oauth2/authorize`（GET・POST） | 同エンドポイント全件。未ログインでログイン画面へ送る 302 も「正しく応答した」として含む |
 | `SLI-4a` | CUJ-4 | 可用性 | 5xx 以外で応答した `POST /oauth2/token` | 同エンドポイント全件 |
 | `SLI-4b` | CUJ-4 | レイテンシ | 300 ms 以内に応答した `POST /oauth2/token` | 同上 |
 | `SLI-5a` | CUJ-5 | 可用性 | 5xx 以外で応答した discovery・JWKS | 両エンドポイント全件 |
@@ -101,7 +101,7 @@
 
 ### 4.1 アラート
 
-SRE Workbook「Alerting on SLOs」の複数窓・バーンレート方式。Sloth が 28 日の期間に合わせて作る（`monitoring/prometheus/slo-rules.yml`）。同書の 99.9%・30 日の推奨例（14.4・6・1）を 28 日に置き直した値になる：
+SRE Workbook「Alerting on SLOs」の複数窓・バーンレート方式。Sloth が 28 日の期間に合わせて作る（`monitoring/prometheus/slo-rules.yml`）。同書の 30 日の推奨例（呼び出し 14.4・6、チケット 1）を 28 日に置き直した値で、チケットの 1 日／2 時間の窓は Sloth が足したもの：
 
 | 重さ（`severity`） | 長い窓 | 短い窓 | バーンレート | 消費するバジェット |
 |---|---|---|---|---|
@@ -126,8 +126,8 @@ v0.3（2026-10-17）で入れた。方針は利用者判断：**管理用のエ�
 | 部品 | 中身 |
 |---|---|
 | `SliMetricsFilter` | CUJ のエンドポイント（§1）だけを、Spring Security より前で数える。指標は `authserver_http_requests_seconds`（`endpoint`・`status_class` タグ）。ヒストグラムの境界は SLO のしきい値（300 ms・1 s）だけ |
-| 公開 | `/actuator/prometheus` と `/actuator/health` を**管理用ポート（`MANAGEMENT_PORT`・既定 8081）だけ**で出す。利用者向けの 8080 には出ない。ほかの actuator（env・beans 等）は出さない。**守りはポートを外に出さないこと**：LB・ファイアウォールで 8081 を Prometheus からだけ届くようにする |
-| 根拠になるテスト | `SliMetricsFilterTest`・`ManagementEndpointTest` |
+| 公開 | `/actuator/prometheus` と `/actuator/health` を**管理用ポート（`MANAGEMENT_PORT`・既定 8081）だけ**で出す。利用者向けの 8080 には出ない。ほかの actuator（env・beans 等）は出さない。**守りはポートを外に出さないこと**：LB・ファイアウォールで 8081 を Prometheus からだけ届くようにする。管理用ポートが無い・利用者向けと同じなら起動しない（`MetricsConfig`） |
+| 根拠になるテスト | `SliMetricsFilterTest`・`ManagementEndpointTest`（振る舞い。テスト用の設定で動く）・`AuthRulesTest`（**本番の設定**を見張る：`config/management-exposure`・`config/management-port`）・`MetricsConfigTest` |
 
 Boot 標準の `http.server.requests` を使わない理由：`POST /login`・`/oauth2/token`・`/oauth2/authorize` などは Spring Security のフィルタが応答して DispatcherServlet まで届かないため、`uri` タグが区別できない（UNKNOWN になる）。パスをそのままタグにすると系列が際限なく増えるので、決めた一覧だけを数える。
 
@@ -140,7 +140,9 @@ Boot 標準の `http.server.requests` を使わない理由：`POST /login`・`/
 | `monitoring/prometheus/tests/` | アラートの単体テスト（`promtool test rules`）。5xx が多いと鳴る・4xx は鳴らない・SLO の範囲なら鳴らない・遅延 |
 | `monitoring/generate.sh` | 生成 → 文法の確認 → 単体テスト。`--check` は生成物の食い違いも落とす（CI の `slo-rules` ジョブ） |
 
-ツールは版を固定する（Sloth v0.11.0・promtool 2.53.2。CI はハッシュも確かめる）。
+ツールは版を固定する（Sloth v0.11.0・promtool 2.53.2。CI はハッシュも確かめる。promtool の tar のハッシュは公式の `sha256sums.txt` と一致を確認済み。Sloth は公式のハッシュが無いため、取得した実物のハッシュを固定）。
+
+CI の `slo-rules` ジョブは、ブランチ保護の必須チェックに入れて初めてマージを止められる（`docs/harness.md` §4）。
 
 ### 6.3 まだ数えていないもの
 

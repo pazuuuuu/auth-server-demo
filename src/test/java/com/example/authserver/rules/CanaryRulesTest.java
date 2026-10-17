@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -105,7 +106,13 @@ class CanaryRulesTest {
                 Arguments.of(false, "app.demo-user.password=${DEMO_USER_PASSWORD:}", null),
                 Arguments.of(true, "spring.jpa.hibernate.ddl-auto=validate", null),
                 Arguments.of(true, "spring.datasource.password=${DB_PASSWORD}", null),
-                Arguments.of(false, "logging.level.org.springframework.security=DEBUG", null));
+                Arguments.of(false, "logging.level.org.springframework.security=DEBUG", null),
+                Arguments.of(true, "management.endpoints.web.exposure.include=*", "config/management-exposure"),
+                Arguments.of(true, "management.endpoints.web.exposure.include=health,prometheus,env", "config/management-exposure"),
+                Arguments.of(true, "management.endpoint.health.show-details=always", "config/management-exposure"),
+                Arguments.of(true, "management.endpoint.health.show-components=when-authorized", "config/management-exposure"),
+                Arguments.of(true, "management.endpoints.web.exposure.include=health, prometheus", null),
+                Arguments.of(true, "management.endpoint.health.show-details=never", null));
     }
 
     @ParameterizedTest(name = "{1} → {2}")
@@ -118,6 +125,22 @@ class CanaryRulesTest {
         } else {
             assertThat(v.ruleIds()).contains(rule);
         }
+    }
+
+    @Test
+    void 既定の設定に管理用ポートが無ければ当たる() {
+        Violations v = new Violations("canary", false);
+        AuthRules.checkManagementPort(Paths.get("src/main/resources/application.properties"),
+                Arrays.asList("management.endpoints.web.exposure.include=health,prometheus", "# management.server.port=8081"), v);
+        assertThat(v.ruleIds()).contains("config/management-port");
+    }
+
+    @Test
+    void 既定の設定に管理用ポートがあれば当たらない() {
+        Violations v = new Violations("canary", false);
+        AuthRules.checkManagementPort(Paths.get("src/main/resources/application.properties"),
+                Arrays.asList("management.server.port=${MANAGEMENT_PORT:8081}"), v);
+        assertThat(v.ruleIds()).isEmpty();
     }
 
     static Stream<Arguments> 複数行にまたがる違反() {
