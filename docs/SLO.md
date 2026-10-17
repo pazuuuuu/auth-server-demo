@@ -1,12 +1,12 @@
 # SLO（サービスレベル目標）
 
-> 版 v0.2（§7 のリスクを修正。計測は未実装）／2026-10-17
-> 進め方は利用者判断で **案A＝まず docs で定義し、計測・アラートは後の段階で入れる**（2026-10-17）。
+> 版 v0.3（計測とアラートを実装・§6。SLO の値はまだ仮）／2026-10-17
+> 進め方は利用者判断で **案A＝まず docs で定義し、計測・アラートは後の段階で入れる**（2026-10-17）。計測とアラート（案B）は v0.3 で入れた（§6）。
 
 ## 0. この文書の位置づけ
 
 - このリポジトリの OIDC プロバイダについて、**何を測り（SLI）、どこまでを良しとし（SLO）、外れたら何を止めるか（エラーバジェットの運用ルール）** を決める。
-- いまは**計測していない**。SLO の値はすべて**仮の初期値**で、計測を入れて 2〜4 週間の実績が取れたら見直す（§6）。
+- 計測とアラートは v0.3 で入れた（§6）。SLO の値はすべて**仮の初期値**で、実績が 2〜4 週間取れたら見直す。
 - 実装例のリポジトリなので、**SLA（利用者との契約）は結ばない**（§5）。
 
 用語（Google SRE 本 4 章）：
@@ -26,7 +26,7 @@
 |---|---|---|---|
 | `CUJ-1` | パスワードでログインする | エンドユーザー | `POST /login` |
 | `CUJ-2` | パスキーでログインする | エンドユーザー | `POST /webauthn/authenticate/options` → `POST /login/webauthn` |
-| `CUJ-3` | RP が認可コードを受け取る | RP・エンドユーザー | `GET /oauth2/authorize`（ログイン済み・同意済みのとき） |
+| `CUJ-3` | RP が認可コードを受け取る | RP・エンドユーザー | `GET /oauth2/authorize`・`POST /oauth2/authorize`（同意の送信） |
 | `CUJ-4` | RP がトークンを受け取る・更新する | RP | `POST /oauth2/token`（`authorization_code`・`refresh_token`） |
 | `CUJ-5` | RP が設定と検証鍵を取得する | RP（ID トークンの検証） | `GET /.well-known/openid-configuration`・`GET /oauth2/jwks` |
 | `CUJ-6` | パスワードを再設定する | エンドユーザー | `POST /forgot-password`・`POST /reset-password` |
@@ -41,7 +41,7 @@
 - **利用者の誤りはサービスの失敗に数えない**：パスワード違い（`/login?error` への 302）、期限切れの再設定トークン、`invalid_grant`・`invalid_client` などの 4xx は「サービスが正しく断った」ので**良いイベント**に含める。
   - ただし 4xx の急増（例：全 RP で `invalid_client`）は設定事故の兆候なので、SLO とは別に監視する。
 - **有効なイベントから除く**もの：ヘルスチェック、明らかなボット・スキャン（未登録の `client_id`）、計画メンテナンス中の要求。
-- **計測点**は、サーバーではなくロードバランサー（またはクライアント）に近いほうがよい（SRE Workbook「Implementing SLOs」）。いまは LB が無いので、計測を入れる段階ではアプリの HTTP メトリクスから始め、LB を置いたら移す。
+- **計測点**は、サーバーではなくロードバランサー（またはクライアント）に近いほうがよい（SRE Workbook「Implementing SLOs」）。いまは LB が無いので、アプリの中（§6.1）で数えている。LB を置いたら移す。
 
 ### 2.2 SLI 一覧
 
@@ -50,7 +50,7 @@
 | `SLI-1a` | CUJ-1 | 可用性 | 5xx 以外で応答した `POST /login` | `POST /login` 全件 |
 | `SLI-1b` | CUJ-1 | レイテンシ | 1,000 ms 以内に応答した `POST /login` | 同上 |
 | `SLI-2` | CUJ-2 | 可用性 | 5xx 以外で応答したパスキー認証の2要求 | パスキー認証の要求全件 |
-| `SLI-3` | CUJ-3 | 可用性 | 5xx 以外で応答した `GET /oauth2/authorize` | 同エンドポイント全件 |
+| `SLI-3` | CUJ-3 | 可用性 | 5xx 以外で応答した `/oauth2/authorize`（GET・POST） | 同エンドポイント全件。未ログインでログイン画面へ送る 302 も「正しく応答した」として含む |
 | `SLI-4a` | CUJ-4 | 可用性 | 5xx 以外で応答した `POST /oauth2/token` | 同エンドポイント全件 |
 | `SLI-4b` | CUJ-4 | レイテンシ | 300 ms 以内に応答した `POST /oauth2/token` | 同上 |
 | `SLI-5a` | CUJ-5 | 可用性 | 5xx 以外で応答した discovery・JWKS | 両エンドポイント全件 |
@@ -99,32 +99,59 @@
 - 1件の障害でバジェットの 20% 以上を使ったら、ふり返り（何が起きたか・なぜ検知が遅れたか・再発防止）を書く。
 - 凍結の例外はリポジトリの持ち主が判断し、判断の理由を PR に残す。
 
-### 4.1 アラート（計測を入れる段階の方針）
+### 4.1 アラート
 
-SRE Workbook「Alerting on SLOs」の複数窓・バーンレート方式に合わせる（下の値は同書の 99.9%・30 日の推奨例。28 日でもほぼ同じ）：
+SRE Workbook「Alerting on SLOs」の複数窓・バーンレート方式。Sloth が 28 日の期間に合わせて作る（`monitoring/prometheus/slo-rules.yml`）。同書の 30 日の推奨例（呼び出し 14.4・6、チケット 1）を 28 日に置き直した値で、チケットの 1 日／2 時間の窓は Sloth が足したもの：
 
-| 重さ | 長い窓 | 短い窓 | バーンレート | 消費するバジェット |
+| 重さ（`severity`） | 長い窓 | 短い窓 | バーンレート | 消費するバジェット |
 |---|---|---|---|---|
-| 呼び出し | 1 時間 | 5 分 | 14.4 | 2% |
-| 呼び出し | 6 時間 | 30 分 | 6 | 5% |
-| チケット | 3 日 | 6 時間 | 1 | 10% |
+| `page`（呼び出し） | 1 時間 | 5 分 | 13.44 | 2% |
+| `page`（呼び出し） | 6 時間 | 30 分 | 5.6 | 5% |
+| `ticket`（チケット） | 1 日 | 2 時間 | 2.8 | 10% |
+| `ticket`（チケット） | 3 日 | 6 時間 | 0.93 | 10% |
+
+アラート名は SLO ごと（`AuthServerTokenAvailability` 等）。ラベル `slo_id` で §3 の表と対応する。
 
 ## 5. SLA
 
 - 実装例のリポジトリなので、**SLA は結ばない**。
 - このコードを元にサービスを提供して SLA を結ぶ場合は、**SLA を SLO より緩くする**（例：SLO 99.95% に対して SLA 99.9%）。社内の目標を厳しくしておくと、契約違反の前に手を打てる（SRE 本 4 章）。測定方法・除外条件（計画メンテナンス、利用者側の誤り）・補償を契約に書く。
 
-## 6. 計測と見直し（次の段階）
+## 6. 計測と見直し
 
-いまは計測していない。次の段階（案B）で入れる候補：
+v0.3（2026-10-17）で入れた。方針は利用者判断：**管理用のエンドポイントは別のポートで公開**、**SLO の定義は Sloth で書いてルールを生成**。
 
-1. Spring Boot Actuator と Micrometer を入れ、`http.server.requests` を `uri`・`status`・`outcome` で集計する（レイテンシはヒストグラムを有効にする）。
-2. SLO の定義を機械で読める形（例：OpenSLO・Sloth）にし、§4.1 のアラートを生成する。
-3. `SLI-5b` は、発行時の `kid` と JWKS の突き合わせが要るので、独自のメトリクスにする。
+### 6.1 計測（アプリ）
 
-見直し：
+| 部品 | 中身 |
+|---|---|
+| `SliMetricsFilter` | CUJ のエンドポイント（§1）だけを、Spring Security より前で数える。指標は `authserver_http_requests_seconds`（`endpoint`・`status_class` タグ）。ヒストグラムの境界は SLO のしきい値（300 ms・1 s）だけ |
+| 公開 | `/actuator/prometheus` と `/actuator/health` を**管理用ポート（`MANAGEMENT_PORT`・既定 8081）だけ**で出す。利用者向けの 8080 には出ない。ほかの actuator（env・beans 等）は出さない。**守りはポートを外に出さないこと**：LB・ファイアウォールで 8081 を Prometheus からだけ届くようにする。管理用ポートが無い・利用者向けと同じなら起動しない（`MetricsConfig`） |
+| 根拠になるテスト | `SliMetricsFilterTest`・`ManagementEndpointTest`（振る舞い。テスト用の設定で動く）・`AuthRulesTest`（**本番の設定**を見張る：`config/management-exposure`・`config/management-port`）・`MetricsConfigTest` |
 
-- 計測を入れて 2〜4 週間の実績が取れたら、§3 の値を見直して版を上げる。
+Boot 標準の `http.server.requests` を使わない理由：`POST /login`・`/oauth2/token`・`/oauth2/authorize` などは Spring Security のフィルタが応答して DispatcherServlet まで届かないため、`uri` タグが区別できない（UNKNOWN になる）。パスをそのままタグにすると系列が際限なく増えるので、決めた一覧だけを数える。
+
+### 6.2 SLO の定義とアラート（Prometheus）
+
+| ファイル | 中身 |
+|---|---|
+| `monitoring/sloth/authserver.yml` | SLO の定義（§3 の値）。**直すのはここ** |
+| `monitoring/prometheus/slo-rules.yml` | 生成物（記録ルールとアラート）。Prometheus に読み込ませる。直接直さない |
+| `monitoring/prometheus/tests/` | アラートの単体テスト（`promtool test rules`）。5xx が多いと鳴る・4xx は鳴らない・SLO の範囲なら鳴らない・遅延 |
+| `monitoring/generate.sh` | 生成 → 文法の確認 → 単体テスト。`--check` は生成物の食い違いも落とす（CI の `slo-rules` ジョブ） |
+
+ツールは版を固定する（Sloth v0.11.0・promtool 2.53.2。CI はハッシュも確かめる。promtool の tar のハッシュは公式の `sha256sums.txt` と一致を確認済み。Sloth は公式のハッシュが無いため、取得した実物のハッシュを固定）。
+
+CI の `slo-rules` ジョブは、ブランチ保護の必須チェックに入れて初めてマージを止められる（`docs/harness.md` §4）。
+
+### 6.3 まだ数えていないもの
+
+- `SLI-5b`（ID トークンの `kid` が JWKS にあるか）：v0.2 から、署名する鍵は必ず JWKS に載る作りになり、プロセスの中では常に成り立つ。崩れるのは鍵のローテーションで旧鍵を早く外しすぎたとき・RP 側のキャッシュで、外から ID トークンを取って検証する合成監視が要る。今回は入れない
+- §2.1 の「有効なイベントから除くもの」（ボット・未登録の `client_id`・計画メンテナンス）：今は除かずに数える（SLO に対して厳しい側に倒れる）
+
+### 6.4 見直し
+
+- 実績が 2〜4 週間取れたら、§3 の値を見直して版を上げる（`monitoring/sloth/authserver.yml` も直して生成し直す）。
 - その後は四半期ごと、または CUJ・アーキテクチャが変わったとき。
 - 見直したら、この文書の版と、判断が変わった理由を残す（`CLAUDE.md`「唯一の正」）。
 

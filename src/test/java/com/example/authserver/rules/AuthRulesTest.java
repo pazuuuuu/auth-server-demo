@@ -39,6 +39,7 @@ class AuthRulesTest {
         for (Path file : files(RESOURCES, ".properties")) {
             AuthRules.checkProperties(file, read(file), AuthRules.strictProfile(file.getFileName().toString()), v);
         }
+        AuthRules.checkManagementPort(RESOURCES.resolve("application.properties"), read(RESOURCES.resolve("application.properties")), v);
         v.assertNone();
     }
 

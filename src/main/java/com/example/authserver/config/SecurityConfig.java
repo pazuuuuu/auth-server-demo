@@ -2,6 +2,9 @@ package com.example.authserver.config;
 
 import com.example.authserver.data.JdbcPublicKeyCredentialUserEntityRepository;
 import com.example.authserver.data.JdbcUserCredentialRepository;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
+import org.springframework.boot.actuate.health.HealthEndpoint;
+import org.springframework.boot.actuate.metrics.export.prometheus.PrometheusScrapeEndpoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -12,6 +15,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.webauthn.management.PublicKeyCredentialUserEntityRepository;
 import org.springframework.security.web.webauthn.management.UserCredentialRepository;
@@ -21,6 +25,21 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    /**
+     * 管理用ポート（management.server.port・既定 8081）の health と prometheus だけを認証なしで通す（docs/SLO.md §6）。
+     * 守りはポートを外に出さないこと（2026-10-17 利用者判断）。ほかの actuator は公開していない（exposure.include）。
+     */
+    @Bean
+    @Order(0)
+    public SecurityFilterChain managementSecurityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .securityMatcher(EndpointRequest.to(HealthEndpoint.class, PrometheusScrapeEndpoint.class))
+            .authorizeHttpRequests((authorize) -> authorize.anyRequest().permitAll())
+            .requestCache((cache) -> cache.disable())
+            .sessionManagement((session) -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+        return http.build();
+    }
 
     @Bean
     @Order(1)

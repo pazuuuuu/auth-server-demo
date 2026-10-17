@@ -1,0 +1,184 @@
+# SLO の定義（Sloth・prometheus/v1）。値と根拠は docs/SLO.md §3。
+# ★このファイルを直したら monitoring/generate.sh でルールを作り直してコミットする（CI が食い違いを落とす）。
+# SLO-5b（ID トークンの kid が JWKS にあるか）は、v0.2 以降はプロセスの中では必ず成り立つため、ここでは数えない（docs/SLO.md §6）。
+version: "prometheus/v1"
+service: "auth-server"
+labels:
+  owner: "auth-server-demo"
+slos:
+  - name: "login-availability"
+    objective: 99.9
+    description: "SLO-1a CUJ-1 パスワードでログイン：5xx 以外で応答した割合"
+    labels:
+      slo_id: "SLO-1a"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="login",status_class="5xx"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="login"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerLoginAvailability"
+      labels:
+        category: "availability"
+      annotations:
+        summary: "SLO-1a のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"
+  - name: "login-latency"
+    objective: 99.0
+    description: "SLO-1b CUJ-1 パスワードでログイン：1,000 ms 以内に応答した割合"
+    labels:
+      slo_id: "SLO-1b"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="login"}[{{.window}}])) - sum(rate(authserver_http_requests_seconds_bucket{endpoint="login",le="1.0"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="login"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerLoginLatency"
+      labels:
+        category: "latency"
+      annotations:
+        summary: "SLO-1b のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"
+  - name: "passkey-availability"
+    objective: 99.5
+    description: "SLO-2 CUJ-2 パスキーでログイン：5xx 以外で応答した割合"
+    labels:
+      slo_id: "SLO-2"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint=~"webauthn_options|webauthn_login",status_class="5xx"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint=~"webauthn_options|webauthn_login"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerPasskeyAvailability"
+      labels:
+        category: "availability"
+      annotations:
+        summary: "SLO-2 のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"
+  - name: "authorize-availability"
+    objective: 99.9
+    description: "SLO-3 CUJ-3 認可コードの受け取り：5xx 以外で応答した割合"
+    labels:
+      slo_id: "SLO-3"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="authorize",status_class="5xx"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="authorize"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerAuthorizeAvailability"
+      labels:
+        category: "availability"
+      annotations:
+        summary: "SLO-3 のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"
+  - name: "token-availability"
+    objective: 99.95
+    description: "SLO-4a CUJ-4 トークンの発行・更新：5xx 以外で応答した割合"
+    labels:
+      slo_id: "SLO-4a"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="token",status_class="5xx"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="token"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerTokenAvailability"
+      labels:
+        category: "availability"
+      annotations:
+        summary: "SLO-4a のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"
+  - name: "token-latency"
+    objective: 99.0
+    description: "SLO-4b CUJ-4 トークンの発行・更新：300 ms 以内に応答した割合"
+    labels:
+      slo_id: "SLO-4b"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="token"}[{{.window}}])) - sum(rate(authserver_http_requests_seconds_bucket{endpoint="token",le="0.3"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint="token"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerTokenLatency"
+      labels:
+        category: "latency"
+      annotations:
+        summary: "SLO-4b のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"
+  - name: "discovery-jwks-availability"
+    objective: 99.95
+    description: "SLO-5a CUJ-5 設定と検証鍵の取得：5xx 以外で応答した割合"
+    labels:
+      slo_id: "SLO-5a"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint=~"discovery|jwks",status_class="5xx"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint=~"discovery|jwks"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerDiscoveryJwksAvailability"
+      labels:
+        category: "availability"
+      annotations:
+        summary: "SLO-5a のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"
+  - name: "password-reset-availability"
+    objective: 99.0
+    description: "SLO-6 CUJ-6 パスワード再設定：5xx 以外で応答した割合"
+    labels:
+      slo_id: "SLO-6"
+    sli:
+      events:
+        error_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint=~"forgot_password|reset_password",status_class="5xx"}[{{.window}}]))'
+        total_query: 'sum(rate(authserver_http_requests_seconds_count{endpoint=~"forgot_password|reset_password"}[{{.window}}]))'
+    alerting:
+      name: "AuthServerPasswordResetAvailability"
+      labels:
+        category: "availability"
+      annotations:
+        summary: "SLO-6 のエラーバジェットを想定より速く消費している"
+        runbook: "docs/SLO.md §4"
+      page_alert:
+        labels:
+          severity: "page"
+      ticket_alert:
+        labels:
+          severity: "ticket"

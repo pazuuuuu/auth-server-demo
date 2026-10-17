@@ -1,6 +1,6 @@
 # ハーネス設計（ガイドとセンサー）
 
-> 版 v0.5（再起動で失われる状態を修正・`docs/SLO.md` §7 v0.2）／2026-10-17
+> 版 v0.6（計測の規約を追加・`docs/SLO.md` §6 v0.3）／2026-10-17
 > 元になった仕組み：`pazuuuuu/webmailer` の `docs/webmailer-harness.html`（§10 記録と自己改善ループ）。
 > 持っていき方は利用者判断で **案A＝共通部分をコピーし、認証・認可の規約は作り直す**（2026-10-06）。
 
@@ -34,7 +34,7 @@
 | 違反の出し方（`Violations`：file:line・ルールID・直し方・根拠、`rules:allow <ID> <理由>`、JSONL の事象） | **コピー** | パッケージだけ変える |
 | 事象の口（`harness_events.py`：Stop・pre-pr・reviewer・CI・`main-red`） | **コピー** | そのまま |
 | `/pre-pr` スキル・`harness-reviewer` の型（観点ID・jsonl ブロック・判断の仰ぎ方） | **型をコピー** | 観点は作り直す（§3.2） |
-| CI の事象アーティファクト `harness-events` | **コピー** | job 名は `build` のまま |
+| CI の事象アーティファクト `harness-events` | **コピー** | job 名は `build` のまま。（v0.6）記録するのは `build` ジョブだけで、`slo-rules` ジョブ（`docs/SLO.md` §6.2）は記録しない＝main で `slo-rules` だけ落ちても `main-red` にならない（2026-10-17 利用者判断・PR #8 Y6 案A）。マージ前は必須チェックで止める（§4） |
 | 「設計書が先」（`design_first.py`） | **持ってこない（当面）** | このリポジトリには FR-ID と設計書の運用が無い。運用を決めたら入れる（§6 Q3） |
 | マイグレーション保護フック | **持ってこない** | `schema.sql`（Spring Authorization Server の標準スキーマ）だけ。`ddl-auto=update` の扱いは §3 |
 | 規約テストの中身 | **作り直す** | §3.1 |
@@ -57,6 +57,8 @@
 | `oauth/implicit-password-grant` | `IMPLICIT`・`PASSWORD` の grant を使わない | RFC 9700 §2.1.2・§2.4 | 0 | 文字列 |
 | `web/csrf-disable` | `csrf().disable()`・`csrf(AbstractHttpConfigurer::disable)` を使わない。`ignoringRequestMatchers` は `rules:allow` と理由が要る | CSRF | **1**（再設定2経路を除外） | 文字列 |
 | `config/prod-defaults` | 既定の `application.properties` で `spring.jpa.hibernate.ddl-auto=update`・`show-sql=true`・security の `DEBUG` を使わない（開発用プロファイルへ） | 本番で意図せずスキーマ変更・ログに資格情報 | **4**（DEBUG 2行・ddl-auto・show-sql） | プロパティ |
+| `config/management-exposure` | （v0.6）既定・`dev` 以外の properties で、actuator の公開は `health`・`prometheus` だけ。health の `show-details`・`show-components` は `never` | env・beans・heapdump 等から資格情報や内部情報が出る（`docs/SLO.md` §6.1） | 0 | プロパティ |
+| `config/management-port` | （v0.6）既定の `application.properties` に `management.server.port` を書く（actuator を利用者向けのポートに出さない）。実行時も、管理用ポートが無い・同じなら起動しない（`MetricsConfig`） | 同上 | 0 | プロパティ（ファイル単位） |
 | `arch/layer` | `web` → `service` → `data` の向きを守る（`data` が `web` を見ない等） | 層の分離 | 0 | ArchUnit 候補 |
 
 ### 3.2 推論系（判断が要る）→ `harness-reviewer` の観点
@@ -78,7 +80,7 @@
 | 問い | 案 | 推奨 | 理由 |
 |---|---|---|---|
 | 規約テストの書き方 | A 文字列とプロパティのテスト（webmailer と同じ自前の `Violations`）／B ArchUnit／C 両方 | **C** | §3.1 の大半は字面（設定のメソッド呼び出し・プロパティ）＝A が素直で、直し方つきのメッセージも出しやすい。層の向き（`arch/layer`）だけ ArchUnit が向く。依存（`archunit-junit5`）が1つ増える |
-| CI 赤のマージ禁止 | A ブランチ保護（必須チェック `build`・最新の main を取り込み済み）／B 運用 | **A** | public なので無料で効く。webmailer で運用にした理由（費用）が無い。設定は GitHub の画面で利用者が行う（§6 Q2） |
+| CI 赤のマージ禁止 | A ブランチ保護（必須チェック `build`・最新の main を取り込み済み）／B 運用 | **A** | public なので無料で効く。webmailer で運用にした理由（費用）が無い。設定は GitHub の画面で利用者が行う（§6 Q2）。（v0.6）`slo-rules` ジョブ（SLO のルールの食い違い・文法・単体テスト。`docs/SLO.md` §6.2）も必須チェックに足す（2026-10-17 利用者判断・PR #8 Y3 案A。同日ルールセット `main` に設定済み） |
 | マージキュー | — | 使わない見込み | 組織が持つリポジトリ向けの機能。個人のリポジトリでは使えない見込み（要確認）。「最新の main を取り込み済み」を必須にして古い main で緑の問題を受ける |
 | 記録の置き場所 | webmailer と同じ孤立ブランチ `harness-data` | 同じ | 公開されるので、事象は要約とルールIDまでにする（§1） |
 
@@ -96,7 +98,7 @@
 | 問い | 決定 | 段階1での扱い |
 |---|---|---|
 | Q1 今の違反 | **案A**：秘密情報・ログ・PKCE・リフレッシュトークンの使い回しは段階1で直す。CSRF の除外と既定のプロパティは、理由つきの例外か開発用プロファイルへの移動で扱う | CSRF の除外は、フォームがすべて `th:action`（Thymeleaf が CSRF トークンを自動で埋め込む）なので**例外にせず外す**。既定のプロパティの DEBUG・`show-sql` は `dev` プロファイルへ、`ddl-auto=update` は `users` 表を `schema.sql` に足して `validate` へ |
-| Q2 ブランチ保護 | **案A**：main に「PR 必須」「必須チェック `build`」「最新の main を取り込み済み」 | GitHub の設定画面で利用者が行う → **設定済み**（2026-10-06・利用者） |
+| Q2 ブランチ保護 | **案A**：main に「PR 必須」「必須チェック `build`」「最新の main を取り込み済み」。（v0.6）必須チェックに `slo-rules` を追加 | GitHub の設定画面で利用者が行う → ルールセット `main` を作成（2026-10-06・利用者）。**2026-10-17 に確認したところ、必須チェックに `build` が無く「最新の main を取り込み済み」も外れていた**（それまで CI 赤でもマージできた。実際のマージはすべて緑）。同日、`build`・`slo-rules` の必須チェックと「最新の main を取り込み済み」を足した（利用者） |
 | Q3 設計書が先 | **案A**：今は入れない | 機能を足す運用を決めたときに入れる |
 | Q4 PR#3 で公開した、非公開リポジトリ側の対象スタックの記述（2026-10-06） | **案A**：現行の文書から消すだけ（v0.4）。履歴の書き換え・非公開化はしない | 製品名と版だけで秘密情報ではない。履歴の書き換えは force push が要り、PR の差分・クローンからは消せない。再発は `harness-reviewer` の `review/public-repo` で見る |
 
@@ -146,10 +148,10 @@
 
 | 部品 | 置き場所 | 備考 |
 |---|---|---|
-| 規約テスト | `src/test/java/com/example/authserver/rules/`（`AuthRules`・`AuthRulesTest`・`Violations`） | §3.1 の11ルール。違反は file:line・ルールID・直し方・根拠つき。例外はその行の `rules:allow <ID> <理由>` だけ |
-| **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（v0.4 で 56件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
+| 規約テスト | `src/test/java/com/example/authserver/rules/`（`AuthRules`・`AuthRulesTest`・`Violations`） | §3.1 の13ルール（v0.6）。違反は file:line・ルールID・直し方・根拠つき。例外はその行の `rules:allow <ID> <理由>` だけ |
+| **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（v0.6 で 66件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
 | Stop フック | `.claude/hooks/stop_sensors.py`・`.claude/settings.json` | `./mvnw test -Dtest=*RulesTest`。2回まで止める・記録が失われても上限がかかる側へ倒す、は webmailer と同じ |
-| 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`） |
+| 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`。`build` ジョブだけ） |
 | `/pre-pr`・`harness-reviewer` | `.claude/skills/pre-pr/`・`.claude/agents/` | 観点は §3.2 に `authz-boundary`・`sensitive-data`・`rule-canary`・`docs-sync` を足した |
 | 守りのテスト | `OidcClientRegistrationTest`・`PasswordResetFlowTest`・`ResetLinkNotLoggedTest` | 「しないこと」：CSRF トークンが無ければ送らない／変えない、存在しない利用者には送らない、トークンは一度しか使えない、知らないトークンでは変えない、既定のプロファイルでリンクも利用者名もログに出さない |
 
@@ -173,6 +175,10 @@
 | `requireProofKey(false)`・`reuseRefreshTokens(true)` | `OidcClientRegistrationTest` と `AuthRulesTest`（`oauth/pkce-required`・`oauth/refresh-rotation`）が落ちる |
 | 既定の通知でリンクをログに出す | `ResetLinkNotLoggedTest` と `AuthRulesTest`（`log/sensitive`）が落ちる |
 | Stop フックの通し（`LoginController` に `System.out`） | 終了コード 2 で `log/stdout` を返し、`.git/harness/events.jsonl` に違反と `stop-block` を記録。直すと 0 |
+| （v0.6）本番の `application.properties` から `management.server.port` を消す／`exposure.include=*` にする | `AuthRulesTest` が落ちる（`config/management-port`／`config/management-exposure`）。`ManagementEndpointTest` はテスト用の設定で動くので、本番の設定はこちらで見張る |
+| （v0.6）`MetricsConfig` のコンストラクタから `requireSeparateManagementPort` の呼び出しを消す | `MetricsConfigTest` の「設定が同じポートならアプリの起動そのものが止まる」が落ちる |
+| （v0.6）`SliMetricsFilter` の `int status = 500` を `200` にする | `SliMetricsFilterTest` の「途中で例外が出た要求は5xxとして数え…」が落ちる |
+| （v0.6）`MetricsConfig` のフィルタの順序を `0`（Spring Security の後ろ）にする | `ManagementEndpointTest` の「管理用ポートでSLIの指標を取れる」が落ちる（jwks を数えられない） |
 | （v0.5）`PasswordResetTokenRepository#consume` の `== 1` を `>= 0` に変える | `PasswordResetTokenRepositoryTest` の「一度しか消費できない」と「期限切れは消費できない」が落ちる |
 | （v0.4）`allowedRedirect` を前方一致に戻す | カナリアの `http://127.0.0.1.attacker.example` と `http://127.0.0.1@evil.example` の2件が落ちる |
 
@@ -180,6 +186,7 @@
 
 - （v0.4・レビューの指摘）センサーの見逃しを塞いだ：`redirectUri` を前方一致でなく `URI` で解析（`http://127.0.0.1.attacker.example`・`http://127.0.0.1@evil.example` を通さない）／`csrf((c) -> c.disable())`・`CsrfConfigurer::disable`・複数行の `csrf(...)` と複数行のログ引数／プロパティの `${X:既定値}` に秘密を書く形／YAML の設定ファイル（`config/yaml-unscanned`＝読まないので置かせない）／`dev` 以外のプロファイル（`application-prod.properties` 等）にも既定と同じ規則。それぞれカナリアに見本を足した
 - **既知の見逃し**（字面の限界。誤検知との兼ね合いで残す）：`DEFAULT_PASSWORD = "…"`・`dbPassword = "…"` のような名前の直書き（`ACR_PASSWORD` 定数と区別できない）／`request.getParameter("token")` のように値を取り出してすぐログに渡す形／`log`・`logger` 以外の名前のロガー／同じファイルの2つ目の `RegisteredClient`（PKCE・ローテーションはファイル単位で判定）／Boot のプロパティでクライアントを登録する `spring.security.oauth2.authorizationserver.client.*`。reviewer の観点（`review/sensitive-data` 等）で補う
+- （v0.6）`config/management-exposure`・`config/management-port` は設定ファイルの字面だけを見る。**環境変数での上書き**（`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=*` 等）は見えない（既知の見逃し）。管理用ポートが利用者向けと同じ・無い場合だけは、実行時に `MetricsConfig` が止める
 - `arch/layer` は ArchUnit を入れず、`import` の字面で判定した（`data` → `web`／`service`、`service` → `web` を禁止）。今の規模（Java 15 ファイル）では依存を1つ増やす理由が弱い。層の規則が増えたら ArchUnit を検討する
 - 残り（§3.2 の観点で、今回は直していないもの）：`acr` をクラス名で判定・拒否リストが7語・利用者の列挙の時間差・再設定後に既存のセッションを失効させない。段階2で、観点ごとに直すかどうかを決める
 - （v0.5・2026-10-17）再設定トークン・署名鍵・パスキーの保存先を直した。詳細と移行時の影響は `docs/SLO.md` §7
