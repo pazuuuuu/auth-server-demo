@@ -34,7 +34,7 @@
 | 違反の出し方（`Violations`：file:line・ルールID・直し方・根拠、`rules:allow <ID> <理由>`、JSONL の事象） | **コピー** | パッケージだけ変える |
 | 事象の口（`harness_events.py`：Stop・pre-pr・reviewer・CI・`main-red`） | **コピー** | そのまま |
 | `/pre-pr` スキル・`harness-reviewer` の型（観点ID・jsonl ブロック・判断の仰ぎ方） | **型をコピー** | 観点は作り直す（§3.2） |
-| CI の事象アーティファクト `harness-events` | **コピー** | job 名は `build` のまま |
+| CI の事象アーティファクト `harness-events` | **コピー** | job 名は `build` のまま。（v0.6）記録するのは `build` ジョブだけで、`slo-rules` ジョブ（`docs/SLO.md` §6.2）は記録しない＝main で `slo-rules` だけ落ちても `main-red` にならない（2026-10-17 利用者判断・PR #8 Y6 案A）。マージ前は必須チェックで止める（§4） |
 | 「設計書が先」（`design_first.py`） | **持ってこない（当面）** | このリポジトリには FR-ID と設計書の運用が無い。運用を決めたら入れる（§6 Q3） |
 | マイグレーション保護フック | **持ってこない** | `schema.sql`（Spring Authorization Server の標準スキーマ）だけ。`ddl-auto=update` の扱いは §3 |
 | 規約テストの中身 | **作り直す** | §3.1 |
@@ -151,7 +151,7 @@
 | 規約テスト | `src/test/java/com/example/authserver/rules/`（`AuthRules`・`AuthRulesTest`・`Violations`） | §3.1 の13ルール（v0.6）。違反は file:line・ルールID・直し方・根拠つき。例外はその行の `rules:allow <ID> <理由>` だけ |
 | **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（v0.6 で 66件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
 | Stop フック | `.claude/hooks/stop_sensors.py`・`.claude/settings.json` | `./mvnw test -Dtest=*RulesTest`。2回まで止める・記録が失われても上限がかかる側へ倒す、は webmailer と同じ |
-| 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`） |
+| 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`。`build` ジョブだけ） |
 | `/pre-pr`・`harness-reviewer` | `.claude/skills/pre-pr/`・`.claude/agents/` | 観点は §3.2 に `authz-boundary`・`sensitive-data`・`rule-canary`・`docs-sync` を足した |
 | 守りのテスト | `OidcClientRegistrationTest`・`PasswordResetFlowTest`・`ResetLinkNotLoggedTest` | 「しないこと」：CSRF トークンが無ければ送らない／変えない、存在しない利用者には送らない、トークンは一度しか使えない、知らないトークンでは変えない、既定のプロファイルでリンクも利用者名もログに出さない |
 

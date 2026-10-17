@@ -36,7 +36,7 @@ Spring Authorization Server で作る **OIDC プロバイダの実装例**（認
 
 - **Stop フック**：`src/`・`pom.xml` に未コミットの変更か main に無いコミットがあると、ターンを終える前に `./mvnw test -Dtest=*RulesTest` を流す。落ちたら**違反と直し方が返ってくるので、そのまま直す**。止めるのは2回まで
 - **PR の前は `/pre-pr`**：`./mvnw verify` → `harness-reviewer` → docs の同期
-- **CI**：指摘と結果は毎回アーティファクト `harness-events` に残る（main への push の失敗＝`main-red`）
+- **CI**：指摘と結果は毎回アーティファクト `harness-events` に残る（main への push の失敗＝`main-red`）。**記録するのは `build` ジョブだけ**（`slo-rules` は記録しない。2026-10-17 利用者判断）
 - 規約テストの例外は、その行に `rules:allow <ルールID> <理由>` を書いたときだけ（理由なしは違反）。テストを消す・無効にするで緑にしない
 - 規約を足したら、字面で判定できるものは `AuthRules` へ（**`CanaryRulesTest` に見本も足す**）、判断が要るものは `harness-reviewer` の観点へ
 
