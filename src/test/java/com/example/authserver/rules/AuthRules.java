@@ -49,7 +49,7 @@ final class AuthRules {
     private static final Pattern PROP_SECRET = Pattern.compile("(?i)^([^=#]*(password|secret)[^=]*)=(.*)$");
     private static final Pattern PLACEHOLDER = Pattern.compile("^\\$\\{[^:}]+(:([^}]*))?\\}$");
     private static final Pattern MGMT_EXPOSURE = Pattern.compile("^management\\.endpoints\\.web\\.exposure\\.include\\s*=(.*)$");
-    private static final Pattern MGMT_DETAILS = Pattern.compile("^management\\.endpoint\\.health\\.show-(details|components)\\s*=\\s*(\\S*)\\s*$");
+    private static final Pattern MGMT_DETAILS = Pattern.compile("^management\\.endpoint\\.health\\.(group\\.[^.=\\s]+\\.)?show-(details|components)\\s*=\\s*(\\S*)\\s*$");
     private static final Pattern MGMT_PORT = Pattern.compile("^management\\.server\\.port\\s*=\\s*\\S+");
     private static final java.util.Set<String> MGMT_ALLOWED = java.util.Set.of("health", "prometheus");
     private static final String SLO_DOC = "docs/SLO.md §6.1";
@@ -170,7 +170,7 @@ final class AuthRules {
                 }
             }
             Matcher det = MGMT_DETAILS.matcher(t);
-            if (det.find() && !"never".equals(det.group(2))) {
+            if (det.find() && !"never".equals(det.group(3))) {
                 v.add(file, n, raw, "config/management-exposure", "health の詳細（DB 等の部品の状態）を出している",
                         "show-details・show-components は never にする", SLO_DOC);
             }

@@ -112,7 +112,9 @@ class CanaryRulesTest {
                 Arguments.of(true, "management.endpoint.health.show-details=always", "config/management-exposure"),
                 Arguments.of(true, "management.endpoint.health.show-components=when-authorized", "config/management-exposure"),
                 Arguments.of(true, "management.endpoints.web.exposure.include=health, prometheus", null),
-                Arguments.of(true, "management.endpoint.health.show-details=never", null));
+                Arguments.of(true, "management.endpoint.health.show-details=never", null),
+                Arguments.of(true, "management.endpoint.health.group.readiness.show-details=always", "config/management-exposure"),
+                Arguments.of(true, "management.endpoint.health.group.liveness.show-components=never", null));
     }
 
     @ParameterizedTest(name = "{1} → {2}")

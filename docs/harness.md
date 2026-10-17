@@ -148,8 +148,8 @@
 
 | 部品 | 置き場所 | 備考 |
 |---|---|---|
-| 規約テスト | `src/test/java/com/example/authserver/rules/`（`AuthRules`・`AuthRulesTest`・`Violations`） | §3.1 の11ルール。違反は file:line・ルールID・直し方・根拠つき。例外はその行の `rules:allow <ID> <理由>` だけ |
-| **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（v0.4 で 56件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
+| 規約テスト | `src/test/java/com/example/authserver/rules/`（`AuthRules`・`AuthRulesTest`・`Violations`） | §3.1 の13ルール（v0.6）。違反は file:line・ルールID・直し方・根拠つき。例外はその行の `rules:allow <ID> <理由>` だけ |
+| **カナリア** | 同 `CanaryRulesTest` | 各ルールに「当たるべき見本」と「当たってはいけない見本」（v0.6 で 66件）。ルールを書き換えて事実上無効にしても落ちる（webmailer の §10.7 を常設したもの）。見本の違反は記録しない |
 | Stop フック | `.claude/hooks/stop_sensors.py`・`.claude/settings.json` | `./mvnw test -Dtest=*RulesTest`。2回まで止める・記録が失われても上限がかかる側へ倒す、は webmailer と同じ |
 | 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`） |
 | `/pre-pr`・`harness-reviewer` | `.claude/skills/pre-pr/`・`.claude/agents/` | 観点は §3.2 に `authz-boundary`・`sensitive-data`・`rule-canary`・`docs-sync` を足した |
@@ -176,6 +176,7 @@
 | 既定の通知でリンクをログに出す | `ResetLinkNotLoggedTest` と `AuthRulesTest`（`log/sensitive`）が落ちる |
 | Stop フックの通し（`LoginController` に `System.out`） | 終了コード 2 で `log/stdout` を返し、`.git/harness/events.jsonl` に違反と `stop-block` を記録。直すと 0 |
 | （v0.6）本番の `application.properties` から `management.server.port` を消す／`exposure.include=*` にする | `AuthRulesTest` が落ちる（`config/management-port`／`config/management-exposure`）。`ManagementEndpointTest` はテスト用の設定で動くので、本番の設定はこちらで見張る |
+| （v0.6）`MetricsConfig` のコンストラクタから `requireSeparateManagementPort` の呼び出しを消す | `MetricsConfigTest` の「設定が同じポートならアプリの起動そのものが止まる」が落ちる |
 | （v0.6）`SliMetricsFilter` の `int status = 500` を `200` にする | `SliMetricsFilterTest` の「途中で例外が出た要求は5xxとして数え…」が落ちる |
 | （v0.6）`MetricsConfig` のフィルタの順序を `0`（Spring Security の後ろ）にする | `ManagementEndpointTest` の「管理用ポートでSLIの指標を取れる」が落ちる（jwks を数えられない） |
 | （v0.5）`PasswordResetTokenRepository#consume` の `== 1` を `>= 0` に変える | `PasswordResetTokenRepositoryTest` の「一度しか消費できない」と「期限切れは消費できない」が落ちる |
@@ -185,6 +186,7 @@
 
 - （v0.4・レビューの指摘）センサーの見逃しを塞いだ：`redirectUri` を前方一致でなく `URI` で解析（`http://127.0.0.1.attacker.example`・`http://127.0.0.1@evil.example` を通さない）／`csrf((c) -> c.disable())`・`CsrfConfigurer::disable`・複数行の `csrf(...)` と複数行のログ引数／プロパティの `${X:既定値}` に秘密を書く形／YAML の設定ファイル（`config/yaml-unscanned`＝読まないので置かせない）／`dev` 以外のプロファイル（`application-prod.properties` 等）にも既定と同じ規則。それぞれカナリアに見本を足した
 - **既知の見逃し**（字面の限界。誤検知との兼ね合いで残す）：`DEFAULT_PASSWORD = "…"`・`dbPassword = "…"` のような名前の直書き（`ACR_PASSWORD` 定数と区別できない）／`request.getParameter("token")` のように値を取り出してすぐログに渡す形／`log`・`logger` 以外の名前のロガー／同じファイルの2つ目の `RegisteredClient`（PKCE・ローテーションはファイル単位で判定）／Boot のプロパティでクライアントを登録する `spring.security.oauth2.authorizationserver.client.*`。reviewer の観点（`review/sensitive-data` 等）で補う
+- （v0.6）`config/management-exposure`・`config/management-port` は設定ファイルの字面だけを見る。**環境変数での上書き**（`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=*` 等）は見えない（既知の見逃し）。管理用ポートが利用者向けと同じ・無い場合だけは、実行時に `MetricsConfig` が止める
 - `arch/layer` は ArchUnit を入れず、`import` の字面で判定した（`data` → `web`／`service`、`service` → `web` を禁止）。今の規模（Java 15 ファイル）では依存を1つ増やす理由が弱い。層の規則が増えたら ArchUnit を検討する
 - 残り（§3.2 の観点で、今回は直していないもの）：`acr` をクラス名で判定・拒否リストが7語・利用者の列挙の時間差・再設定後に既存のセッションを失効させない。段階2で、観点ごとに直すかどうかを決める
 - （v0.5・2026-10-17）再設定トークン・署名鍵・パスキーの保存先を直した。詳細と移行時の影響は `docs/SLO.md` §7
