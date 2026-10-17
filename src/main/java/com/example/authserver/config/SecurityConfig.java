@@ -1,5 +1,7 @@
 package com.example.authserver.config;
 
+import com.example.authserver.data.JdbcPublicKeyCredentialUserEntityRepository;
+import com.example.authserver.data.JdbcUserCredentialRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -9,7 +11,10 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.webauthn.management.PublicKeyCredentialUserEntityRepository;
+import org.springframework.security.web.webauthn.management.UserCredentialRepository;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 
@@ -74,9 +79,16 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /** 登録済みのパスキーは DB に置く（再起動・複数台でも消えない。docs/SLO.md §7）。 */
     @Bean
-    public org.springframework.security.web.webauthn.management.UserCredentialRepository userCredentialRepository() {
-        return new org.springframework.security.web.webauthn.management.MapUserCredentialRepository();
+    public UserCredentialRepository userCredentialRepository(JdbcTemplate jdbcTemplate) {
+        return new JdbcUserCredentialRepository(jdbcTemplate);
+    }
+
+    /** パスキーの user handle と利用者名の対応も DB に置く（メモリのままだと再起動で user handle が変わり、パスキーと結び付かない）。 */
+    @Bean
+    public PublicKeyCredentialUserEntityRepository publicKeyCredentialUserEntityRepository(JdbcTemplate jdbcTemplate) {
+        return new JdbcPublicKeyCredentialUserEntityRepository(jdbcTemplate);
     }
 
 }

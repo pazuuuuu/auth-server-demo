@@ -7,14 +7,8 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
 import java.util.UUID;
 
-import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
@@ -114,33 +108,33 @@ public class AuthorizationServerConfig {
         return new JdbcOAuth2AuthorizationConsentService(jdbcTemplate, registeredClientRepository);
     }
 
+    /**
+     * 署名鍵。環境変数 JWT_SIGNING_KEY（PKCS#8 の PEM）から読む。旧鍵の公開鍵は JWT_PREVIOUS_PUBLIC_KEYS（任意）。
+     * 鍵が無いと起動しない。dev プロファイルとテストだけ app.jwt.allow-ephemeral-key=true で起動ごとの鍵を許す（docs/SLO.md §7）。
+     */
     @Bean
-    public JWKSource<SecurityContext> jwkSource() {
-        KeyPair keyPair = generateRsaKey();
-        RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
-        RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
-        RSAKey rsaKey = new RSAKey.Builder(publicKey)
-                .privateKey(privateKey)
-                .keyID(UUID.randomUUID().toString())
-                .build();
-        JWKSet jwkSet = new JWKSet(rsaKey);
-        return new ImmutableJWKSet<>(jwkSet);
-    }
-
-    private static KeyPair generateRsaKey() {
-        try {
-            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-            keyPairGenerator.initialize(2048);
-            return keyPairGenerator.generateKeyPair();
-        } catch (Exception ex) {
-            throw new IllegalStateException(ex);
+    public SigningKeys signingKeys(@Value("${app.jwt.signing-key:}") String signingKey,
+            @Value("${app.jwt.previous-public-keys:}") String previousPublicKeys,
+            @Value("${app.jwt.allow-ephemeral-key:false}") boolean allowEphemeral) {
+        SigningKeys keys = SigningKeys.load(signingKey, previousPublicKeys, allowEphemeral);
+        if (signingKey.isBlank()) {
+            log.warn("JWT_SIGNING_KEY is not set; using a key generated for this process only (tokens become unverifiable after restart)");
         }
+        log.info("JWT signing key id: {}", keys.currentKeyId());
+        return keys;
+    }
+
+    /** JWKS（/oauth2/jwks）と、userinfo 等でアクセストークンを検証する JwtDecoder が使う鍵の集合（今の鍵＋旧鍵）。 */
+    @Bean
+    public JWKSource<SecurityContext> jwkSource(SigningKeys signingKeys) {
+        return new ImmutableJWKSet<>(signingKeys.publishedSet());
     }
 
     @Bean
-    public OAuth2TokenGenerator<?> tokenGenerator(JWKSource<SecurityContext> jwkSource,
+    public OAuth2TokenGenerator<?> tokenGenerator(SigningKeys signingKeys,
             OAuth2TokenCustomizer<JwtEncodingContext> tokenCustomizer) {
-        JwtGenerator jwtGenerator = new JwtGenerator(new NimbusJwtEncoder(jwkSource));
+        // 署名は今の鍵だけで行う（旧鍵は検証用に JWKS へ出すだけ）
+        JwtGenerator jwtGenerator = new JwtGenerator(new NimbusJwtEncoder(new ImmutableJWKSet<>(signingKeys.signingSet())));
         jwtGenerator.setJwtCustomizer(tokenCustomizer);
         OAuth2AccessTokenGenerator accessTokenGenerator = new OAuth2AccessTokenGenerator();
         com.example.authserver.service.CustomRefreshTokenGenerator refreshTokenGenerator = new com.example.authserver.service.CustomRefreshTokenGenerator();

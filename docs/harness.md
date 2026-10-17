@@ -1,6 +1,6 @@
 # ハーネス設計（ガイドとセンサー）
 
-> 版 v0.4（段階1・レビューの指摘を反映）／2026-10-06
+> 版 v0.5（再起動で失われる状態を修正・`docs/SLO.md` §7 v0.2）／2026-10-17
 > 元になった仕組み：`pazuuuuu/webmailer` の `docs/webmailer-harness.html`（§10 記録と自己改善ループ）。
 > 持っていき方は利用者判断で **案A＝共通部分をコピーし、認証・認可の規約は作り直す**（2026-10-06）。
 
@@ -64,10 +64,10 @@
 | 観点ID | 見ること | 今の気になる点（v0.1） |
 |---|---|---|
 | `review/auth-enumeration` | 利用者の有無が応答・時間差で漏れないか | `createToken` は存在しない利用者で即 `null`（メール送信の分だけ時間差が出る） |
-| `review/reset-token` | 再設定トークンの強さ・保存（ハッシュで持つか）・一回限り・失効・他セッションの無効化 | 平文で in-memory の Map に保持（再起動で消える・複数台で共有されない）。再設定後に既存のセッション・トークンを失効させていない |
-| `review/key-management` | 署名鍵の生成・保管・ローテーション | 起動ごとに RSA 鍵を生成＝再起動で発行済みトークンが検証できなくなる |
+| `review/reset-token` | 再設定トークンの強さ・保存（ハッシュで持つか）・一回限り・失効・他セッションの無効化 | ~~平文で in-memory の Map に保持~~→ v0.5 で DB にハッシュで保持・利用者ごとに1本（`docs/SLO.md` §7）。再設定後に既存のセッション・トークンを失効させていない |
+| `review/key-management` | 署名鍵の生成・保管・ローテーション | ~~起動ごとに RSA 鍵を生成~~→ v0.5 で環境変数 `JWT_SIGNING_KEY` から読む・kid はサムプリント・旧鍵を JWKS に並べられる（`docs/SLO.md` §7）。`app.jwt.allow-ephemeral-key` を本番で true にする抜け道は残る |
 | `review/authn-context` | `acr`・`amr` の決め方が確かか | クラス名に `WebAuthn` を含むかで判定（壊れやすい） |
-| `review/credential-store` | パスキー等の資格情報の保存先 | `MapUserCredentialRepository`（in-memory）＝再起動で登録が消える |
+| `review/credential-store` | パスキー等の資格情報の保存先 | ~~`MapUserCredentialRepository`（in-memory）~~→ v0.5 で DB（`user_credentials`・`user_entities`・6.4 向けに自作）（`docs/SLO.md` §7） |
 | `review/token-lifetime` | アクセス・リフレッシュトークンの寿命と、スコープでの延長の妥当性 | `mobile_access` で30日。使い回し（3.1 `oauth/refresh-rotation`）と組み合わさると長命の漏えいになる |
 | `review/password-policy` | NIST SP 800-63B（漏えい済みパスワードとの照合・長さ・組み合わせ規則を課さない） | 拒否リストが7語だけ |
 | `review/test-negative` | 守りの分岐に「しないこと」のテストがあるか（CSRF 不一致で変えない、期限切れトークンで再設定しない 等） | テストが起動確認の1件だけ |
@@ -173,6 +173,7 @@
 | `requireProofKey(false)`・`reuseRefreshTokens(true)` | `OidcClientRegistrationTest` と `AuthRulesTest`（`oauth/pkce-required`・`oauth/refresh-rotation`）が落ちる |
 | 既定の通知でリンクをログに出す | `ResetLinkNotLoggedTest` と `AuthRulesTest`（`log/sensitive`）が落ちる |
 | Stop フックの通し（`LoginController` に `System.out`） | 終了コード 2 で `log/stdout` を返し、`.git/harness/events.jsonl` に違反と `stop-block` を記録。直すと 0 |
+| （v0.5）`PasswordResetTokenRepository#consume` の `== 1` を `>= 0` に変える | `PasswordResetTokenRepositoryTest` の「一度しか消費できない」と「期限切れは消費できない」が落ちる |
 | （v0.4）`allowedRedirect` を前方一致に戻す | カナリアの `http://127.0.0.1.attacker.example` と `http://127.0.0.1@evil.example` の2件が落ちる |
 
 ### 7.4 判断表との違い・残り
@@ -180,4 +181,5 @@
 - （v0.4・レビューの指摘）センサーの見逃しを塞いだ：`redirectUri` を前方一致でなく `URI` で解析（`http://127.0.0.1.attacker.example`・`http://127.0.0.1@evil.example` を通さない）／`csrf((c) -> c.disable())`・`CsrfConfigurer::disable`・複数行の `csrf(...)` と複数行のログ引数／プロパティの `${X:既定値}` に秘密を書く形／YAML の設定ファイル（`config/yaml-unscanned`＝読まないので置かせない）／`dev` 以外のプロファイル（`application-prod.properties` 等）にも既定と同じ規則。それぞれカナリアに見本を足した
 - **既知の見逃し**（字面の限界。誤検知との兼ね合いで残す）：`DEFAULT_PASSWORD = "…"`・`dbPassword = "…"` のような名前の直書き（`ACR_PASSWORD` 定数と区別できない）／`request.getParameter("token")` のように値を取り出してすぐログに渡す形／`log`・`logger` 以外の名前のロガー／同じファイルの2つ目の `RegisteredClient`（PKCE・ローテーションはファイル単位で判定）／Boot のプロパティでクライアントを登録する `spring.security.oauth2.authorizationserver.client.*`。reviewer の観点（`review/sensitive-data` 等）で補う
 - `arch/layer` は ArchUnit を入れず、`import` の字面で判定した（`data` → `web`／`service`、`service` → `web` を禁止）。今の規模（Java 15 ファイル）では依存を1つ増やす理由が弱い。層の規則が増えたら ArchUnit を検討する
-- 残り（§3.2 の観点で、今回は直していないもの）：再設定トークンを平文の in-memory で持つ・署名鍵が起動ごと・`acr` をクラス名で判定・パスキーが in-memory・拒否リストが7語・利用者の列挙の時間差。段階2で、観点ごとに直すかどうかを決める
+- 残り（§3.2 の観点で、今回は直していないもの）：`acr` をクラス名で判定・拒否リストが7語・利用者の列挙の時間差・再設定後に既存のセッションを失効させない。段階2で、観点ごとに直すかどうかを決める
+- （v0.5・2026-10-17）再設定トークン・署名鍵・パスキーの保存先を直した。詳細と移行時の影響は `docs/SLO.md` §7

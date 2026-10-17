@@ -47,7 +47,10 @@ public class ResetPasswordController {
             return "reset-password";
         }
 
-        passwordResetTokenService.updatePassword(token, password);
+        if (!passwordResetTokenService.updatePassword(token, password)) {
+            // 検証の後に期限が切れた・同時に別の要求が使った
+            return "redirect:/login?error=invalid_token";
+        }
         return "redirect:/reset-password/success";
     }
 

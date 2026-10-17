@@ -41,6 +41,8 @@ This project demonstrates a production-ready OIDC provider implementation with a
    |---|---|---|
    | `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | yes | PostgreSQL (Supabase) |
    | `OIDC_CLIENT_SECRET` | yes | secret of the demo client `oidc-client`; at least 32 random characters (the app refuses to start otherwise) |
+   | `JWT_SIGNING_KEY` | yes (outside `dev`) | RSA private key (PKCS#8 PEM, 2048 bits or more) that signs ID and access tokens, e.g. `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`. The app refuses to start without it; the `dev` profile falls back to a per-process key |
+   | `JWT_PREVIOUS_PUBLIC_KEYS` | during key rotation | public key(s) (PEM) of the previous signing key, published in the JWKS so tokens it signed stay verifiable |
    | `APP_BASE_URL` | in production | public base URL used in password reset links (defaults to `http://localhost:8080`) |
    | `SPRING_PROFILES_ACTIVE=dev` | development only | DEBUG logs, the demo user, and reset links written to the log |
    | `DEMO_USER_PASSWORD` | development only | password of the demo user `user` (dev profile) |
