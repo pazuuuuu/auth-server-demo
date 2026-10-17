@@ -39,7 +39,6 @@ public class PasswordResetTokenService {
         this.baseUrl = baseUrl;
     }
 
-    @Transactional
     public String createToken(String username) {
         if (!userRepository.existsById(username)) {
             // Security: Do not reveal if user exists
@@ -49,7 +48,7 @@ public class PasswordResetTokenService {
         RANDOM.nextBytes(raw);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
         Instant now = Instant.now();
-        // DB にはハッシュだけを置く（docs/SLO.md §7）
+        // DB にはハッシュだけを置く（docs/SLO.md §7）。送るのは保存のトランザクションを閉じた後（送信の間 DB を握らない）
         tokenRepository.replaceForUser(hash(token), username, now.plus(TOKEN_TTL), now);
 
         // 届け方は PasswordResetNotifier に任せる（dev はログで模擬・それ以外は送らない）。ここではトークンをログに出さない

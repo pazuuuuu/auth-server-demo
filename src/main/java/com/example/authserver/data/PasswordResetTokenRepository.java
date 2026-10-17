@@ -2,6 +2,7 @@ package com.example.authserver.data;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -23,6 +24,7 @@ public class PasswordResetTokenRepository {
     }
 
     /** 利用者ごとに有効なリンクは1本だけにする（前のリンクと期限切れの行を消してから入れる）。 */
+    @Transactional
     public void replaceForUser(String tokenHash, String username, Instant expiresAt, Instant now) {
         jdbc.update("DELETE FROM password_reset_token WHERE username = ? OR expires_at <= ?", username, Timestamp.from(now));
         jdbc.update("INSERT INTO password_reset_token (token_hash, username, expires_at) VALUES (?, ?, ?)",

@@ -139,7 +139,19 @@ v0.1 で挙げたリスクと、v0.2 での直し方（方針は利用者判断�
 | パスワード再設定トークン（`PasswordResetTokenService`） | メモリ上 | `SLO-6`：再起動で送った再設定リンクが使えなくなる | **DB の表 `password_reset_token` に、トークンの SHA-256 ハッシュだけを置く**。有効なリンクは利用者ごとに1本（新しく送ると前のリンクは使えない）。使うときは期限内の行を消せた要求だけがパスワードを変える（同時に2回使っても1回だけ） |
 | 複数台構成 | 上の3つはプロセスごとに持つ | 台数を増やすと、要求が別の台に行ったときに失敗する | 上の3つが DB と環境変数に移ったので、同じ鍵と DB を共有すれば複数台で動く |
 
-根拠になるテスト：`SigningKeysTest`・`JwksEndpointTest`・`PasskeyRepositoriesTest`・`PasswordResetFlowTest`。
+根拠になるテスト：`SigningKeysTest`・`JwksEndpointTest`・`PasskeyRepositoriesTest`・`PasswordResetFlowTest`・`PasswordResetTokenRepositoryTest`。
+
+### 7.1 移行時の影響（v0.1 → v0.2 のデプロイ）
+
+- 本番（`dev` 以外）は **`JWT_SIGNING_KEY` が無いと起動しない**。デプロイの前に鍵を作って環境変数に入れる（`.env.example`）
+- 最初のデプロイで、それまで起動ごとの鍵で署名したトークンはすべて検証できなくなる（v0.1 でも再起動のたびに起きていたことで、避けられない）。RP は利用者にログインし直してもらう
+- 新しい3つの表（`password_reset_token`・`user_entities`・`user_credentials`）は、起動時に `schema.sql`（`CREATE TABLE IF NOT EXISTS`）で作られる
+- v0.1 でメモリ上に登録したパスキーは引き継げない。利用者に登録し直してもらう
+
+### 7.2 残っていること
+
+- 同じ利用者への再設定の要求が同時に来ると、有効なリンクが2本できうる（`username` に一意制約が無いため）。どちらも15分で切れ、使えるのはそれぞれ1回だけ
+- `app.jwt.allow-ephemeral-key=true` を環境変数などで本番に入れると、起動ごとの鍵に戻る（警告ログは出るが起動は止まらない）
 
 ## 8. DORA メトリクスとの関係
 
