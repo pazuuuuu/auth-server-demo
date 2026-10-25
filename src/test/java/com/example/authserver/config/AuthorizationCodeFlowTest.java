@@ -7,6 +7,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2RefreshToken;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -20,8 +29,10 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -50,6 +61,9 @@ class AuthorizationCodeFlowTest {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    OAuth2AuthorizationService authorizations;
 
     // --- 認可エンドポイント ---
 
@@ -189,6 +203,28 @@ class AuthorizationCodeFlowTest {
     }
 
     @Test
+    void 同じリフレッシュトークンで同時に来た2本目は使い回しとして失効させる() throws Exception {
+        String t0 = exchange(code(), VERIFIER, 200).path("refresh_token").asText();
+        RequestAttributes a = new ServletRequestAttributes(new MockHttpServletRequest());
+        RequestAttributes b = new ServletRequestAttributes(new MockHttpServletRequest());
+        // 2本の要求が、どちらもローテーションの前に t0 を今のトークンとして引いた（検索の時点では見分けられない）
+        OAuth2Authorization seenByA = inRequest(a, () -> authorizations.findByToken(t0, OAuth2TokenType.REFRESH_TOKEN));
+        OAuth2Authorization seenByB = inRequest(b, () -> authorizations.findByToken(t0, OAuth2TokenType.REFRESH_TOKEN));
+        assertThat(seenByA).isNotNull();
+        assertThat(seenByB).isNotNull();
+
+        inRequest(a, () -> { authorizations.save(rotate(seenByA, "rotated-by-a")); return null; });
+
+        // 保存のときに行をロックして比べる＝2本目は「もうローテーションされたトークンを使った」と分かる（PR #11 Y1 案A）
+        assertThatThrownBy(() -> inRequest(b, () -> { authorizations.save(rotate(seenByB, "rotated-by-b")); return null; }))
+                .isInstanceOf(OAuth2AuthenticationException.class)
+                .satisfies(e -> assertThat(((OAuth2AuthenticationException) e).getError().getErrorCode()).isEqualTo("invalid_grant"));
+        assertThat(authorizations.findById(seenByA.getId())).isNull();
+        assertThat(refresh("rotated-by-a", 400).path("error").asText()).isEqualTo("invalid_grant");
+        assertThat(refresh("rotated-by-b", 400).path("error").asText()).isEqualTo("invalid_grant");
+    }
+
+    @Test
     void 使い回しで失効させるのはその許可だけで他の許可は失効させない() throws Exception {
         JsonNode reused = exchange(code(), VERIFIER, 200);
         JsonNode other = exchange(code(), VERIFIER, 200);
@@ -319,6 +355,21 @@ class AuthorizationCodeFlowTest {
 
     private JsonNode body(MvcResult result) throws Exception {
         return json.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+    }
+
+    private static <T> T inRequest(RequestAttributes request, Callable<T> body) throws Exception {
+        RequestContextHolder.setRequestAttributes(request);
+        try {
+            return body.call();
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    private static OAuth2Authorization rotate(OAuth2Authorization authorization, String refreshToken) {
+        Instant now = Instant.now();
+        return OAuth2Authorization.from(authorization)
+                .refreshToken(new OAuth2RefreshToken(refreshToken, now, now.plusSeconds(3600))).build();
     }
 
     private int rotatedRows(String refreshToken) throws Exception {

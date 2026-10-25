@@ -8,6 +8,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 
 import java.time.Clock;
+
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import java.util.UUID;
 
 import com.example.authserver.data.RotatedRefreshTokenRepository;
@@ -103,9 +106,11 @@ public class AuthorizationServerConfig {
     /** 保存は JDBC。リフレッシュトークンの使い回しを見つけたら authorization を丸ごと失効させる（RFC 9700 §4.14.2・docs/harness.md §7.6）。 */
     @Bean
     public OAuth2AuthorizationService authorizationService(JdbcTemplate jdbcTemplate,
-            RegisteredClientRepository registeredClientRepository, RotatedRefreshTokenRepository rotatedRefreshTokens) {
+            RegisteredClientRepository registeredClientRepository, RotatedRefreshTokenRepository rotatedRefreshTokens,
+            PlatformTransactionManager transactionManager) {
         return new RefreshTokenReuseDetectingAuthorizationService(
-                new JdbcOAuth2AuthorizationService(jdbcTemplate, registeredClientRepository), rotatedRefreshTokens, Clock.systemUTC());
+                new JdbcOAuth2AuthorizationService(jdbcTemplate, registeredClientRepository), rotatedRefreshTokens,
+                jdbcTemplate, new TransactionTemplate(transactionManager), Clock.systemUTC());
     }
 
     @Bean
