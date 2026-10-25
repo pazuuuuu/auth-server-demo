@@ -49,6 +49,11 @@ class HarnessEventsTest(RepoTestCase):
         result = self.ci_rows()[-1]
         self.assertEqual((result["severity"], result["note"]), ("red", "main-red"))
 
+    def test_mainでないブランチへのpushの失敗はmain_redにしない(self):
+        self.events("ci", "--status", "failure", GITHUB_EVENT_NAME="push", GITHUB_REF_NAME="feat/x")
+        result = self.ci_rows()[-1]
+        self.assertEqual((result["severity"], result["note"]), ("red", None))
+
     def test_PRの失敗はmain_redにしない(self):
         self.events("ci", "--status", "failure", GITHUB_EVENT_NAME="pull_request", GITHUB_HEAD_REF="main")
         self.assertIsNone(self.ci_rows()[-1]["note"])
@@ -98,9 +103,9 @@ class HarnessEventsTest(RepoTestCase):
         self.target_events({"rule": "log/stdout", "fp": "fp-1", "outcome": "open"})
         self.events("stop", "1", "blocked")
         _, out, _ = self.events("pre-pr")
-        self.assertIn("1 件", out)
+        self.assertIn("pre-pr の事象 1 件を", out)
         _, out, _ = self.events("pre-pr")
-        self.assertIn("0 件", out)
+        self.assertIn("pre-pr の事象 0 件を", out)
         self.assertEqual(sorted(r["source"] for r in self.store() if r["rule"] == "log/stdout"), ["pre-pr", "stop"])
 
     # --- reviewer ---
@@ -141,6 +146,12 @@ class HarnessEventsTest(RepoTestCase):
         _, rows = self.pr_block("--outcome", "R1=fixed,Y2=wontfix")
         self.assertEqual({r["id"]: r["outcome"] for r in rows},
                          {"r1-R1": "fixed", "r1-Y1": "fixed", "r2-R1": "fixed", "r2-Y1": "open", "r2-Y2": "wontfix"})
+
+    def test_pr_blockの周回なしの指定は最後の周回だけを指す(self):
+        self.events("reviewer", self.report({"id": "Y1"}))
+        self.events("reviewer", self.report({"id": "Y1"}))
+        _, rows = self.pr_block("--outcome", "Y1=wontfix")
+        self.assertEqual({r["id"]: r["outcome"] for r in rows}, {"r1-Y1": "fixed", "r2-Y1": "wontfix"})
 
     def test_pr_blockの周回つきの指定は前の周回も指せる(self):
         self.events("reviewer", self.report({"id": "Y1"}))

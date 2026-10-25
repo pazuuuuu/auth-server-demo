@@ -37,6 +37,7 @@ jobs:
 
       # ハーネスのフック（Stop フック・事象の口）そのもののテスト（docs/harness.md §7.1）。標準ライブラリだけ・数秒
       - name: Test harness hooks
+        if: success() || failure()   # verify が落ちてもフックのテストの結果は出す（取り消しのときは流さない）
         run: python3 -m unittest discover -s .claude/hooks/tests -v
 
       - name: Collect harness events (findings + CI result)

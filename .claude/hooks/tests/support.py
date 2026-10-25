@@ -48,13 +48,18 @@ FAKE_MVNW = textwrap.dedent("""\
     """).replace("<TAB>", "\t")
 
 
+CEILING = os.path.dirname(tempfile.mkdtemp(prefix="harness-hook-ceiling-"))
+
+
 def clean_env(**extra):
     """CI の GITHUB_*・手元の CLAUDE_* を持ち込まない（テストが走る場所で結果が変わらないように）。"""
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("GITHUB_", "HARNESS_", "CLAUDE_", "GIT_", "FAKE_MVNW_"))}
     env.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
-                "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C.UTF-8"})
+                "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C.UTF-8",
+                # 一時ディレクトリが別の git の作業ツリーの下にあっても、親のリポジトリを見に行かない
+                "GIT_CEILING_DIRECTORIES": CEILING})
     env.update(extra)
     return env
 
@@ -71,7 +76,8 @@ class RepoTestCase(unittest.TestCase):
         self.put(".gitignore", "target/\nmvnw-calls.log\n")
         self.put("mvnw", FAKE_MVNW)
         os.chmod(os.path.join(self.root, "mvnw"), 0o755)
-        self.git("init", "-q", "-b", "main")
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")  # init -b は git 2.28 以上が要るので使わない
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "init")
 
