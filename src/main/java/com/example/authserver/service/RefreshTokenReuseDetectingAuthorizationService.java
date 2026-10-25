@@ -57,7 +57,7 @@ public class RefreshTokenReuseDetectingAuthorizationService implements OAuth2Aut
 
     @Override
     public void save(OAuth2Authorization authorization) {
-        boolean reused = Boolean.TRUE.equals(transaction.execute(status -> {
+        Boolean rotatedNow = transaction.execute(status -> {
             String current = lockCurrentRefreshToken(authorization.getId());
             OAuth2Authorization.Token<OAuth2RefreshToken> after = authorization.getRefreshToken();
             String next = after != null ? after.getToken().getTokenValue() : null;
@@ -65,19 +65,24 @@ public class RefreshTokenReuseDetectingAuthorizationService implements OAuth2Aut
             if (current != null && used != null && !used.equals(next) && !used.equals(current)) {
                 // この要求が使ったトークンは、検索の後に別の要求がローテーションした＝同時に来た使い回し
                 revoke(authorization.getId(), authorization.getRegisteredClientId());
-                return true;
+                return null;
             }
             if (current != null && !Objects.equals(current, next)) {
                 OAuth2Authorization existing = delegate.findById(authorization.getId());
                 OAuth2Authorization.Token<OAuth2RefreshToken> before = existing != null ? existing.getRefreshToken() : null;
                 rotated.record(hash(current), authorization.getId(),
                         before != null ? before.getToken().getExpiresAt() : null, clock.instant());
+                delegate.save(authorization);
+                return true;
             }
             delegate.save(authorization);
             return false;
-        }));
-        if (reused) {
+        });
+        if (rotatedNow == null) {
             throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_GRANT);
+        }
+        if (rotatedNow) {
+            rotated.purgeExpired(clock.instant());
         }
     }
 

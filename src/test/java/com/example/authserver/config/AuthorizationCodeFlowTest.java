@@ -6,7 +6,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import com.example.authserver.data.RotatedRefreshTokenRepository;
+import com.example.authserver.service.RefreshTokenReuseDetectingAuthorizationService;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2RefreshToken;
@@ -29,7 +35,13 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.time.Clock;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,6 +76,15 @@ class AuthorizationCodeFlowTest {
 
     @Autowired
     OAuth2AuthorizationService authorizations;
+
+    @Autowired
+    RegisteredClientRepository clients;
+
+    @Autowired
+    RotatedRefreshTokenRepository rotatedRefreshTokens;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
 
     // --- 認可エンドポイント ---
 
@@ -225,6 +246,53 @@ class AuthorizationCodeFlowTest {
     }
 
     @Test
+    void 本当に同時に来た2本目は1本目のコミットを待ってから使い回しとして失効させる() throws Exception {
+        String t0 = exchange(code(), VERIFIER, 200).path("refresh_token").asText();
+        CountDownLatch aIsSaving = new CountDownLatch(1);
+        CountDownLatch releaseA = new CountDownLatch(1);
+        // 1本目（A）の保存を、行のロックを取った後・コミットの前で止める
+        OAuth2AuthorizationService jdbcStore = new JdbcOAuth2AuthorizationService(jdbc, clients);
+        OAuth2AuthorizationService pausing = new OAuth2AuthorizationService() {
+            public void save(OAuth2Authorization authorization) {
+                jdbcStore.save(authorization);
+                if (aIsSaving.getCount() > 0) {
+                    aIsSaving.countDown();
+                    await(releaseA);
+                }
+            }
+            public void remove(OAuth2Authorization authorization) { jdbcStore.remove(authorization); }
+            public OAuth2Authorization findById(String id) { return jdbcStore.findById(id); }
+            public OAuth2Authorization findByToken(String token, OAuth2TokenType type) { return jdbcStore.findByToken(token, type); }
+        };
+        OAuth2AuthorizationService service = new RefreshTokenReuseDetectingAuthorizationService(
+                pausing, rotatedRefreshTokens, jdbc, new TransactionTemplate(transactionManager), Clock.systemUTC());
+        RequestAttributes a = new ServletRequestAttributes(new MockHttpServletRequest());
+        RequestAttributes b = new ServletRequestAttributes(new MockHttpServletRequest());
+        OAuth2Authorization seenByA = inRequest(a, () -> service.findByToken(t0, OAuth2TokenType.REFRESH_TOKEN));
+        ExecutorService threads = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> saveA = threads.submit(() -> inRequest(a, () -> { service.save(rotate(seenByA, "concurrent-a")); return null; }));
+            assertThat(aIsSaving.await(10, TimeUnit.SECONDS)).isTrue();
+            // A はまだコミットしていない＝B の検索でも t0 が今のトークンに見える
+            OAuth2Authorization seenByB = inRequest(b, () -> service.findByToken(t0, OAuth2TokenType.REFRESH_TOKEN));
+            assertThat(seenByB).isNotNull();
+            Future<?> saveB = threads.submit(() -> inRequest(b, () -> { service.save(rotate(seenByB, "concurrent-b")); return null; }));
+            Thread.sleep(300);  // B を行のロック待ちに入れる（間に合わなくても、A のコミットの後に B が比べるので結果は同じ）
+            releaseA.countDown();
+
+            saveA.get(10, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> saveB.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(OAuth2AuthenticationException.class);
+        } finally {
+            releaseA.countDown();
+            threads.shutdownNow();
+        }
+        assertThat(service.findById(seenByA.getId())).isNull();
+        assertThat(refresh("concurrent-a", 400).path("error").asText()).isEqualTo("invalid_grant");
+        assertThat(refresh("concurrent-b", 400).path("error").asText()).isEqualTo("invalid_grant");
+    }
+
+    @Test
     void 使い回しで失効させるのはその許可だけで他の許可は失効させない() throws Exception {
         JsonNode reused = exchange(code(), VERIFIER, 200);
         JsonNode other = exchange(code(), VERIFIER, 200);
@@ -355,6 +423,14 @@ class AuthorizationCodeFlowTest {
 
     private JsonNode body(MvcResult result) throws Exception {
         return json.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static <T> T inRequest(RequestAttributes request, Callable<T> body) throws Exception {

@@ -29,7 +29,7 @@ class RotatedRefreshTokenRepositoryTest {
     }
 
     @Test
-    void 同じトークンを二度覚えようとしても失敗せず先の行を残す() {
+    void 同じトークンを二度覚えようとしても失敗する文を出さず先の行を残す() {
         repository.record("h1", "auth-1", NOW.plusSeconds(60), NOW);
 
         assertThatCode(() -> repository.record("h1", "auth-2", NOW.plusSeconds(60), NOW)).doesNotThrowAnyException();
@@ -43,6 +43,7 @@ class RotatedRefreshTokenRepositoryTest {
                 java.sql.Timestamp.from(NOW.minusSeconds(1)));
 
         repository.record("h2", "auth-1", NOW.minusSeconds(60), NOW);
+        repository.purgeExpired(NOW);
 
         assertThat(repository.findAuthorizationId("h2")).isEmpty();
         assertThat(repository.findAuthorizationId("old")).isEmpty();
