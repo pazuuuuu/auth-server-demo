@@ -18,6 +18,8 @@ import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HexFormat;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
@@ -166,11 +168,39 @@ class AuthorizationCodeFlowTest {
 
         String rotated = refresh(old, 200).path("refresh_token").asText();
         assertThat(rotated).isNotEmpty().isNotEqualTo(old);
-        assertThat(refresh(rotated, 200).path("refresh_token").asText()).isNotEmpty().isNotEqualTo(rotated);
 
         assertThat(refresh(old, 400).path("error").asText()).isEqualTo("invalid_grant");
-        // 使い回しを見つけたあと、今有効なトークンを失効させるか（RFC 9700 §4.14.2）は今の実装ではしない。
-        // 「失効させない」を正しいとして固定しないよう、ここでは assert しない（docs/harness.md §7.5 の残り）
+    }
+
+    @Test
+    void 使い回しを見つけたら今有効なトークンも失効させる() throws Exception {
+        JsonNode first = exchange(code(), VERIFIER, 200);
+        JsonNode second = refresh(first.path("refresh_token").asText(), 200);
+
+        // 古いトークンが来た＝どちらかが盗まれた。どちらが正しいクライアントか区別できないので丸ごと失効させる（RFC 9700 §4.14.2）
+        assertThat(refresh(first.path("refresh_token").asText(), 400).path("error").asText()).isEqualTo("invalid_grant");
+
+        assertThat(refresh(second.path("refresh_token").asText(), 400).path("error").asText()).isEqualTo("invalid_grant");
+        assertThat(introspect(second.path("access_token").asText()).path("active").asBoolean()).isFalse();
+    }
+
+    @Test
+    void 使い回しの見張りにはトークンそのものを置かずハッシュだけを置く() throws Exception {
+        String old = exchange(code(), VERIFIER, 200).path("refresh_token").asText();
+        refresh(old, 200);
+
+        List<String> hashes = jdbc.queryForList("SELECT token_hash FROM oauth2_rotated_refresh_token", String.class);
+
+        assertThat(hashes).contains(sha256(old)).doesNotContain(old);
+    }
+
+    @Test
+    void 知らないリフレッシュトークンでは何も失効させない() throws Exception {
+        JsonNode tokens = exchange(code(), VERIFIER, 200);
+
+        assertThat(refresh("not-a-refresh-token", 400).path("error").asText()).isEqualTo("invalid_grant");
+
+        assertThat(refresh(tokens.path("refresh_token").asText(), 200).path("access_token").asText()).isNotEmpty();
     }
 
     @Test
@@ -262,6 +292,10 @@ class AuthorizationCodeFlowTest {
 
     private JsonNode body(MvcResult result) throws Exception {
         return json.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+    }
+
+    private static String sha256(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
     }
 
     private static String challenge(String verifier) throws Exception {
