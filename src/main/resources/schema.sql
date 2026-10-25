@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS oauth2_rotated_refresh_token (
     PRIMARY KEY (token_hash)
 );
 CREATE INDEX IF NOT EXISTS oauth2_rotated_refresh_token_authorization ON oauth2_rotated_refresh_token (authorization_id);
+CREATE INDEX IF NOT EXISTS oauth2_rotated_refresh_token_expires ON oauth2_rotated_refresh_token (expires_at);
 
 -- パスワード再設定トークン（PasswordResetTokenRepository）。トークンそのものではなく SHA-256 のハッシュを置く（docs/SLO.md §7）
 CREATE TABLE IF NOT EXISTS password_reset_token (

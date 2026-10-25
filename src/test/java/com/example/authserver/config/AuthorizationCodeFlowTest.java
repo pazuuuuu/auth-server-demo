@@ -168,6 +168,7 @@ class AuthorizationCodeFlowTest {
 
         String rotated = refresh(old, 200).path("refresh_token").asText();
         assertThat(rotated).isNotEmpty().isNotEqualTo(old);
+        assertThat(refresh(rotated, 200).path("refresh_token").asText()).isNotEmpty().isNotEqualTo(rotated);
 
         assertThat(refresh(old, 400).path("error").asText()).isEqualTo("invalid_grant");
     }
@@ -176,12 +177,38 @@ class AuthorizationCodeFlowTest {
     void 使い回しを見つけたら今有効なトークンも失効させる() throws Exception {
         JsonNode first = exchange(code(), VERIFIER, 200);
         JsonNode second = refresh(first.path("refresh_token").asText(), 200);
+        assertThat(introspect(second.path("access_token").asText()).path("active").asBoolean()).isTrue();
 
         // 古いトークンが来た＝どちらかが盗まれた。どちらが正しいクライアントか区別できないので丸ごと失効させる（RFC 9700 §4.14.2）
         assertThat(refresh(first.path("refresh_token").asText(), 400).path("error").asText()).isEqualTo("invalid_grant");
 
         assertThat(refresh(second.path("refresh_token").asText(), 400).path("error").asText()).isEqualTo("invalid_grant");
         assertThat(introspect(second.path("access_token").asText()).path("active").asBoolean()).isFalse();
+        // 失効した authorization の見張りの行も残さない
+        assertThat(rotatedRows(first.path("refresh_token").asText())).isZero();
+    }
+
+    @Test
+    void 使い回しで失効させるのはその許可だけで他の許可は失効させない() throws Exception {
+        JsonNode reused = exchange(code(), VERIFIER, 200);
+        JsonNode other = exchange(code(), VERIFIER, 200);
+        refresh(reused.path("refresh_token").asText(), 200);
+
+        refresh(reused.path("refresh_token").asText(), 400);
+
+        assertThat(introspect(other.path("access_token").asText()).path("active").asBoolean()).isTrue();
+        assertThat(refresh(other.path("refresh_token").asText(), 200).path("access_token").asText()).isNotEmpty();
+    }
+
+    @Test
+    void 古いトークンをintrospectionに出しただけでは失効させない() throws Exception {
+        JsonNode first = exchange(code(), VERIFIER, 200);
+        JsonNode second = refresh(first.path("refresh_token").asText(), 200);
+
+        // token_type_hint なし＝トークンの種類を決めずに引く経路。グラントではないので使い回しとはみなさない
+        assertThat(introspect(first.path("refresh_token").asText()).path("active").asBoolean()).isFalse();
+
+        assertThat(refresh(second.path("refresh_token").asText(), 200).path("access_token").asText()).isNotEmpty();
     }
 
     @Test
@@ -292,6 +319,11 @@ class AuthorizationCodeFlowTest {
 
     private JsonNode body(MvcResult result) throws Exception {
         return json.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+    }
+
+    private int rotatedRows(String refreshToken) throws Exception {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM oauth2_rotated_refresh_token WHERE token_hash = ?",
+                Integer.class, sha256(refreshToken));
     }
 
     private static String sha256(String value) throws Exception {
