@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS oauth2_authorization_consent (
     PRIMARY KEY (registered_client_id, principal_name)
 );
 
+-- ローテーションで捨てたリフレッシュトークン（RotatedRefreshTokenRepository）。使い回しを見つけたら、その authorization を丸ごと失効させる
+-- （RFC 9700 §4.14.2・docs/harness.md §7.6）。トークンそのものではなく SHA-256 のハッシュを置く。行は古いトークンの期限まで
+CREATE TABLE IF NOT EXISTS oauth2_rotated_refresh_token (
+    token_hash varchar(64) NOT NULL,
+    authorization_id varchar(100) NOT NULL,
+    expires_at timestamp NOT NULL,
+    PRIMARY KEY (token_hash)
+);
+CREATE INDEX IF NOT EXISTS oauth2_rotated_refresh_token_authorization ON oauth2_rotated_refresh_token (authorization_id);
+CREATE INDEX IF NOT EXISTS oauth2_rotated_refresh_token_expires ON oauth2_rotated_refresh_token (expires_at);
+
 -- パスワード再設定トークン（PasswordResetTokenRepository）。トークンそのものではなく SHA-256 のハッシュを置く（docs/SLO.md §7）
 CREATE TABLE IF NOT EXISTS password_reset_token (
     token_hash varchar(64) NOT NULL,

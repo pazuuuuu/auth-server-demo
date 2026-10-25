@@ -7,7 +7,14 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 
+import java.time.Clock;
+
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import java.util.UUID;
+
+import com.example.authserver.data.RotatedRefreshTokenRepository;
+import com.example.authserver.service.RefreshTokenReuseDetectingAuthorizationService;
 
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
@@ -78,7 +85,7 @@ public class AuthorizationServerConfig {
                             .requireProofKey(true)          // 機密クライアントも PKCE 必須（RFC 9700 §2.1.1）
                             .build())
                     .tokenSettings(TokenSettings.builder()
-                            .reuseRefreshTokens(false)      // 使い回さない＝漏えいの検知（RFC 9700 §4.14）
+                            .reuseRefreshTokens(false)      // 使い回さない＝漏えいの検知。見つけたら失効（RFC 9700 §4.14・RefreshTokenReuseDetectingAuthorizationService）
                             .build())
                     .build();
             repository.save(oidcClient);
@@ -96,10 +103,14 @@ public class AuthorizationServerConfig {
         }
     }
 
+    /** 保存は JDBC。リフレッシュトークンの使い回しを見つけたら authorization を丸ごと失効させる（RFC 9700 §4.14.2・docs/harness.md §7.6）。 */
     @Bean
     public OAuth2AuthorizationService authorizationService(JdbcTemplate jdbcTemplate,
-            RegisteredClientRepository registeredClientRepository) {
-        return new JdbcOAuth2AuthorizationService(jdbcTemplate, registeredClientRepository);
+            RegisteredClientRepository registeredClientRepository, RotatedRefreshTokenRepository rotatedRefreshTokens,
+            PlatformTransactionManager transactionManager) {
+        return new RefreshTokenReuseDetectingAuthorizationService(
+                new JdbcOAuth2AuthorizationService(jdbcTemplate, registeredClientRepository), rotatedRefreshTokens,
+                jdbcTemplate, new TransactionTemplate(transactionManager), Clock.systemUTC());
     }
 
     @Bean
