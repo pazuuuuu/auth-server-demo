@@ -38,5 +38,6 @@ build/
 !.env.example
 
 ### Local artifacts ###
+__pycache__/
 *.log
 project.tgz

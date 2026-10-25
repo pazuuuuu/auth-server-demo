@@ -1,6 +1,6 @@
 # ハーネス設計（ガイドとセンサー）
 
-> 版 v0.6（計測の規約を追加・`docs/SLO.md` §6 v0.3）／2026-10-17
+> 版 v0.7（フックそのもののテストを追加）／2026-10-25 ← v0.6（計測の規約を追加・`docs/SLO.md` §6 v0.3）／2026-10-17
 > 元になった仕組み：`pazuuuuu/webmailer` の `docs/webmailer-harness.html`（§10 記録と自己改善ループ）。
 > 持っていき方は利用者判断で **案A＝共通部分をコピーし、認証・認可の規約は作り直す**（2026-10-06）。
 
@@ -13,7 +13,7 @@
 |  | 計算系（決定的・速い） | 推論系（LLM の判断） |
 |---|---|---|
 | **ガイド** | フック（`.claude/settings.json`） | `CLAUDE.md`・本書・`/pre-pr` スキル |
-| **センサー** | 規約テスト `*RulesTest`・`./mvnw verify` の全テスト・**CI（必須チェック）** | `harness-reviewer` サブエージェント（読み取り専用） |
+| **センサー** | 規約テスト `*RulesTest`・`./mvnw verify` の全テスト・（v0.7）フックのテスト `.claude/hooks/tests/`・**CI（必須チェック）** | `harness-reviewer` サブエージェント（読み取り専用） |
 
 ## 1. webmailer との違い
 
@@ -34,7 +34,7 @@
 | 違反の出し方（`Violations`：file:line・ルールID・直し方・根拠、`rules:allow <ID> <理由>`、JSONL の事象） | **コピー** | パッケージだけ変える |
 | 事象の口（`harness_events.py`：Stop・pre-pr・reviewer・CI・`main-red`） | **コピー** | そのまま |
 | `/pre-pr` スキル・`harness-reviewer` の型（観点ID・jsonl ブロック・判断の仰ぎ方） | **型をコピー** | 観点は作り直す（§3.2） |
-| CI の事象アーティファクト `harness-events` | **コピー** | job 名は `build` のまま。（v0.6）記録するのは `build` ジョブだけで、`slo-rules` ジョブ（`docs/SLO.md` §6.2）は記録しない＝main で `slo-rules` だけ落ちても `main-red` にならない（2026-10-17 利用者判断・PR #8 Y6 案A）。マージ前は必須チェックで止める（§4） |
+| CI の事象アーティファクト `harness-events` | **コピー** | job 名は `build` のまま。（v0.7）`ci/result` に段ごとの結果 `steps` と落ちた段 `failed_steps`（`verify`・`hooks`）を足した（拡張フィールド。2026-10-25 利用者判断・PR #9 Y2 案A）。（v0.6）記録するのは `build` ジョブだけで、`slo-rules` ジョブ（`docs/SLO.md` §6.2）は記録しない＝main で `slo-rules` だけ落ちても `main-red` にならない（2026-10-17 利用者判断・PR #8 Y6 案A）。マージ前は必須チェックで止める（§4） |
 | 「設計書が先」（`design_first.py`） | **持ってこない（当面）** | このリポジトリには FR-ID と設計書の運用が無い。運用を決めたら入れる（§6 Q3） |
 | マイグレーション保護フック | **持ってこない** | `schema.sql`（Spring Authorization Server の標準スキーマ）だけ。`ddl-auto=update` の扱いは §3 |
 | 規約テストの中身 | **作り直す** | §3.1 |
@@ -83,6 +83,7 @@
 | CI 赤のマージ禁止 | A ブランチ保護（必須チェック `build`・最新の main を取り込み済み）／B 運用 | **A** | public なので無料で効く。webmailer で運用にした理由（費用）が無い。設定は GitHub の画面で利用者が行う（§6 Q2）。（v0.6）`slo-rules` ジョブ（SLO のルールの食い違い・文法・単体テスト。`docs/SLO.md` §6.2）も必須チェックに足す（2026-10-17 利用者判断・PR #8 Y3 案A。同日ルールセット `main` に設定済み） |
 | マージキュー | — | 使わない見込み | 組織が持つリポジトリ向けの機能。個人のリポジトリでは使えない見込み（要確認）。「最新の main を取り込み済み」を必須にして古い main で緑の問題を受ける |
 | 記録の置き場所 | webmailer と同じ孤立ブランチ `harness-data` | 同じ | 公開されるので、事象は要約とルールIDまでにする（§1） |
+| （v0.7）フック（`stop_sensors.py`・`harness_events.py`）のテスト | A 標準の `unittest`・一時 git リポジトリ＋偽の `mvnw` で別プロセスとして呼ぶ／B pytest／C テストしない（手で1回通した §7.3 のまま） | **A** | フックは「止めすぎない・止めなさすぎない」の分岐が要で、壊れても Stop の時にしか気づけない（センサーのセンサーが要る）。依存を増やさない（フックも標準ライブラリだけ）。外から呼ぶので中を書き換えても同じテストが効く。流すのは CI の `build` ジョブ（`verify` が落ちても流す。どちらの段で落ちたかは `ci/result` の `failed_steps` に残す＝2026-10-25 利用者判断・PR #9 Y2 案A）と `/pre-pr`。Stop フックでは流さない（`.claude/` を変えるのはまれ。要れば見張る範囲に足す） |
 
 ## 5. 段階
 
@@ -153,6 +154,7 @@
 | Stop フック | `.claude/hooks/stop_sensors.py`・`.claude/settings.json` | `./mvnw test -Dtest=*RulesTest`。2回まで止める・記録が失われても上限がかかる側へ倒す、は webmailer と同じ |
 | 事象の口 | `.claude/hooks/harness_events.py` | そのままコピー。Stop・pre-pr・reviewer は `.git/harness/events.jsonl`、CI は毎回アーティファクト `harness-events`（30日・`main-red`。`build` ジョブだけ） |
 | `/pre-pr`・`harness-reviewer` | `.claude/skills/pre-pr/`・`.claude/agents/` | 観点は §3.2 に `authz-boundary`・`sensitive-data`・`rule-canary`・`docs-sync` を足した |
+| （v0.7）フックのテスト | `.claude/hooks/tests/`（`test_stop_sensors.py`・`test_harness_events.py`・土台 `support.py`） | 52件。`python3 -m unittest discover -s .claude/hooks/tests`（CI の `build`・`/pre-pr`）。Stop：見張る範囲・指紋で流し直さない・exit 2 と違反の返し方・連鎖で2回まで・回数が壊れた／消えた／書けないときに上限側へ倒す・記録。事象の口：`main-red` の条件・PR 番号・指紋の重複除け・reviewer の周回・`pr-block` の outcome と `-->` の逃がし |
 | 守りのテスト | `OidcClientRegistrationTest`・`PasswordResetFlowTest`・`ResetLinkNotLoggedTest` | 「しないこと」：CSRF トークンが無ければ送らない／変えない、存在しない利用者には送らない、トークンは一度しか使えない、知らないトークンでは変えない、既定のプロファイルでリンクも利用者名もログに出さない |
 
 ### 7.2 今の違反の直し方（Q1＝案A）
@@ -180,6 +182,8 @@
 | （v0.6）`SliMetricsFilter` の `int status = 500` を `200` にする | `SliMetricsFilterTest` の「途中で例外が出た要求は5xxとして数え…」が落ちる |
 | （v0.6）`MetricsConfig` のフィルタの順序を `0`（Spring Security の後ろ）にする | `ManagementEndpointTest` の「管理用ポートでSLIの指標を取れる」が落ちる（jwks を数えられない） |
 | （v0.5）`PasswordResetTokenRepository#consume` の `== 1` を `>= 0` に変える | `PasswordResetTokenRepositoryTest` の「一度しか消費できない」と「期限切れは消費できない」が落ちる |
+| （v0.7）`stop_sensors.py` の `MAX_BLOCKS` を 3 に／壊れた回数を 0 とみなす／連鎖の途中で書けなくても止める／前回のレポートを消さない／見張る範囲に `docs` を足す | それぞれ `test_stop_sensors` の 3・2・1・1・2 件が落ちる |
+| （v0.7）`harness_events.py` の `main-red` を push に限らない／main に限らない／`-->` を逃がさない／指紋の重複除けを外す／周回なしの `--outcome` を最後の周回に限らない／`failed_steps` に failure 以外の段も入れる | それぞれ `test_harness_events`（と `test_stop_sensors`）の 1・1・1・3・1・2 件が落ちる |
 | （v0.4）`allowedRedirect` を前方一致に戻す | カナリアの `http://127.0.0.1.attacker.example` と `http://127.0.0.1@evil.example` の2件が落ちる |
 
 ### 7.4 判断表との違い・残り

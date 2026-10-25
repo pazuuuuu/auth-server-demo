@@ -2,6 +2,7 @@
 # Tests run against an in-memory H2 database (src/test/resources/application.properties),
 # so no Supabase credentials or secrets are needed here.
 # The auth rule sensors (AuthRulesTest / CanaryRulesTest, docs/harness.md §3.1) run as part of verify.
+# The harness hooks themselves (.claude/hooks/tests) are tested right after.
 # Every run also uploads the harness events (findings + the CI result; a red push to main is "main-red")
 # as the artifact harness-events (docs/harness.md §2).
 name: CI
@@ -32,13 +33,21 @@ jobs:
           cache: maven
 
       - name: Build and test
+        id: verify
         run: ./mvnw -B -ntp verify
+
+      # ハーネスのフック（Stop フック・事象の口）そのもののテスト（docs/harness.md §7.1）。標準ライブラリだけ・数秒
+      - name: Test harness hooks
+        id: hooks
+        if: success() || failure()   # verify が落ちてもフックのテストの結果は出す（取り消しのときは流さない）
+        run: python3 -m unittest discover -s .claude/hooks/tests -v
 
       - name: Collect harness events (findings + CI result)
         if: always()
         env:
           HARNESS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: python3 .claude/hooks/harness_events.py ci --status ${{ job.status }}
+        # どの段で落ちたかを ci/result の failed_steps に残す（docs/harness.md §4・PR #9 Y2 案A）
+        run: python3 .claude/hooks/harness_events.py ci --status ${{ job.status }} --steps "verify=${{ steps.verify.outcome }},hooks=${{ steps.hooks.outcome }}"
 
       - name: Upload harness events (always)
         if: always()

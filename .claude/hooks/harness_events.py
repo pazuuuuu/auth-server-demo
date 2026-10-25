@@ -12,9 +12,10 @@ design_first → target/harness/events/design-first.jsonl）。ここで出ど�
       止めた回数も harness/stop-block として1件（status に blocked|warned）。
   harness_events.py pre-pr
       /pre-pr の mvn clean verify・design_first の後に呼ぶ。target/ の事象を出どころ pre-pr で同じ場所へ追記する。
-  harness_events.py ci --status <success|failure|cancelled>
+  harness_events.py ci --status <success|failure|cancelled> [--steps verify=success,hooks=failure]
       CI の最後に呼ぶ。target/harness/events/ci.jsonl を作る（アーティファクト harness-events で残す）。
       CI の結果そのもの（ci/result）も1件として残す＝main への push で failure なら main-red。
+      --steps を渡すと段ごとの結果を ci/result の steps に、failure の段を failed_steps に残す（どの段で落ちたか）。
   harness_events.py reviewer <harness-reviewer の報告ファイル>
       報告の末尾の ```jsonl ブロックを .git/harness/events.jsonl へ移す（mvn clean・rm -rf で消えない）。
       周回ごとに id を r<周回>-<R1|Y1> にする（2周目の R1 は別の指摘なので混ぜない）。
@@ -157,7 +158,17 @@ def pr_number():
     return int(m.group(1)) if m else None
 
 
-def cmd_ci(root, status):
+def parse_steps(text):
+    """"verify=success,hooks=failure" → {"verify": "success", "hooks": "failure"}。名前か結果が空のものは捨てる。"""
+    steps = {}
+    for kv in (text or "").split(","):
+        k, _, v = kv.partition("=")
+        if k.strip() and v.strip():
+            steps[k.strip()] = v.strip()
+    return steps
+
+
+def cmd_ci(root, status, steps=None):
     branch = os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME") or git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
     commit = (os.environ.get("HARNESS_HEAD_SHA") or os.environ.get("GITHUB_SHA") or git(root, ["rev-parse", "HEAD"]) or "")[:7]
     pr = pr_number()
@@ -168,6 +179,9 @@ def cmd_ci(root, status):
                  "branch": branch, "commit": commit, "pr": pr, "outcome": "open", "status": status,
                  "event": event, "run": os.environ.get("GITHUB_RUN_ID"),
                  "note": "main-red" if (event == "push" and branch == "main" and status == "failure") else None})
+    if steps:
+        rows[-1]["steps"] = steps
+        rows[-1]["failed_steps"] = [name for name, outcome in steps.items() if outcome == "failure"]
     out = os.path.join(root, "target", "harness", "events", "ci.jsonl")
     if os.path.exists(out):
         os.remove(out)
@@ -241,7 +255,8 @@ def main(argv):
         return cmd_pre_pr(root)
     if mode == "ci":
         status = argv[argv.index("--status") + 1] if "--status" in argv else "unknown"
-        return cmd_ci(root, status)
+        steps = parse_steps(argv[argv.index("--steps") + 1]) if "--steps" in argv[:-1] else None
+        return cmd_ci(root, status, steps)
     if mode == "reviewer" and len(argv) > 2:
         return cmd_reviewer(root, argv[2])
     if mode == "pr-block":
