@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -14,6 +15,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +46,9 @@ class AuthorizationCodeFlowTest {
     @Autowired
     ObjectMapper json;
 
+    @Autowired
+    JdbcTemplate jdbc;
+
     // --- 認可エンドポイント ---
 
     @Test
@@ -64,8 +70,11 @@ class AuthorizationCodeFlowTest {
 
     @Test
     void 登録の無いredirect_uriへは転送しない() throws Exception {
+        // RFC 9700 §4.1.3：登録した値と完全に一致するものだけ（前方一致・大文字小文字の違い・クエリの足し込みも通さない）
         for (String uri : new String[] {"https://evil.example/cb", "https://oidcdebugger.com/debug/evil",
-                "https://oidcdebugger.com.evil.example/debug", "http://oidcdebugger.com/debug"}) {
+                "https://oidcdebugger.com.evil.example/debug", "http://oidcdebugger.com/debug",
+                "https://oidcdebugger.com@evil.example/debug", "https://oidcdebugger.com/debug?x=1",
+                "https://oidcdebugger.com/debug/", "https://OIDCDEBUGGER.com/debug"}) {
             MvcResult result = mvc.perform(withPkce(authorize(uri))).andReturn();
 
             assertThat(result.getResponse().getStatus()).as(uri).isEqualTo(400);
@@ -113,12 +122,40 @@ class AuthorizationCodeFlowTest {
     }
 
     @Test
+    void トークン要求のredirect_uriが認可要求と違えば交換しない() throws Exception {
+        // RFC 6749 §4.1.3。どちらもこのクライアントに登録済みの値
+        JsonNode error = body(mvc.perform(post("/oauth2/token").with(httpBasic(CLIENT_ID, SECRET))
+                        .param("grant_type", "authorization_code").param("code", code())
+                        .param("redirect_uri", "http://127.0.0.1:8080/login/oauth2/code/oidc-client")
+                        .param("code_verifier", VERIFIER))
+                .andExpect(status().isBadRequest()).andReturn());
+
+        assertThat(error.path("error").asText()).isEqualTo("invalid_grant");
+        assertThat(error.has("access_token")).isFalse();
+    }
+
+    @Test
+    void 期限切れの認可コードでは交換しない() throws Exception {
+        String code = code();
+        int updated = jdbc.update("UPDATE oauth2_authorization SET authorization_code_issued_at = ?, authorization_code_expires_at = ?"
+                        + " WHERE authorization_code_value = ?",
+                Timestamp.from(Instant.now().minusSeconds(600)), Timestamp.from(Instant.now().minusSeconds(60)), code);
+        assertThat(updated).as("期限切れにした認可コード").isEqualTo(1);
+
+        JsonNode error = exchange(code, VERIFIER, 400);
+
+        assertThat(error.path("error").asText()).isEqualTo("invalid_grant");
+        assertThat(error.has("access_token")).isFalse();
+    }
+
+    @Test
     void 認可コードは一度しか使えず二度目が来たら出したトークンも無効にする() throws Exception {
         String code = code();
         JsonNode first = exchange(code, VERIFIER, 200);
 
         assertThat(exchange(code, VERIFIER, 400).path("error").asText()).isEqualTo("invalid_grant");
-        // RFC 6749 §4.1.2：コードが2回使われたら、そのコードで出したトークンを取り消す（コードが漏れたとみなす）
+        // RFC 6749 §4.1.2：コードが2回使われたら、そのコードで出したトークンを取り消す（コードが漏れたとみなす）。
+        // 取り消しが効くのは記録を見る経路（introspection・userinfo）だけ。JWT をローカルで検証する側は exp まで受け入れる
         assertThat(introspect(first.path("access_token").asText()).path("active").asBoolean()).isFalse();
         assertThat(refresh(first.path("refresh_token").asText(), 400).path("error").asText()).isEqualTo("invalid_grant");
     }
@@ -129,9 +166,25 @@ class AuthorizationCodeFlowTest {
 
         String rotated = refresh(old, 200).path("refresh_token").asText();
         assertThat(rotated).isNotEmpty().isNotEqualTo(old);
+        assertThat(refresh(rotated, 200).path("refresh_token").asText()).isNotEmpty().isNotEqualTo(rotated);
 
         assertThat(refresh(old, 400).path("error").asText()).isEqualTo("invalid_grant");
-        assertThat(refresh(rotated, 200).path("access_token").asText()).isNotEmpty();
+        // 使い回しを見つけたあと、今有効なトークンを失効させるか（RFC 9700 §4.14.2）は今の実装ではしない。
+        // 「失効させない」を正しいとして固定しないよう、ここでは assert しない（docs/harness.md §7.5 の残り）
+    }
+
+    @Test
+    void リフレッシュで元の許可に無いscopeを求めたら出さない() throws Exception {
+        String refreshToken = exchange(code(), VERIFIER, 200).path("refresh_token").asText();
+
+        // RFC 6749 §6：元の許可（openid だけ）より広い scope は出さない
+        JsonNode error = body(mvc.perform(post("/oauth2/token").with(httpBasic(CLIENT_ID, SECRET))
+                        .param("grant_type", "refresh_token").param("refresh_token", refreshToken)
+                        .param("scope", "openid profile"))
+                .andExpect(status().isBadRequest()).andReturn());
+
+        assertThat(error.path("error").asText()).isEqualTo("invalid_scope");
+        assertThat(error.has("access_token")).isFalse();
     }
 
     @Test

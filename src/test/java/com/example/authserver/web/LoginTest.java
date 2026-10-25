@@ -54,7 +54,7 @@ class LoginTest {
 
     @Test
     void 存在しない利用者と違うパスワードと無効な利用者は同じ応答で認証しない() throws Exception {
-        String[][] attempts = {{"nobody", PASSWORD}, {"dave", PASSWORD + "x"}, {"erin", PASSWORD}};
+        String[][] attempts = {{"nobody", PASSWORD}, {"dave", PASSWORD + "x"}, {"erin", PASSWORD}, {"erin", PASSWORD + "x"}};
         for (String[] attempt : attempts) {
             mvc.perform(formLogin().user(attempt[0]).password(attempt[1]))
                     .andExpect(redirectedUrl("/login?error"))
@@ -65,6 +65,13 @@ class LoginTest {
     @Test
     void CSRFトークンが無いログインは拒否し認証しない() throws Exception {
         mvc.perform(post("/login").param("username", "dave").param("password", PASSWORD))
+                .andExpect(status().isForbidden())
+                .andExpect(unauthenticated());
+    }
+
+    @Test
+    void CSRFトークンが違うログインは拒否し認証しない() throws Exception {
+        mvc.perform(post("/login").with(csrf().useInvalidToken()).param("username", "dave").param("password", PASSWORD))
                 .andExpect(status().isForbidden())
                 .andExpect(unauthenticated());
     }
