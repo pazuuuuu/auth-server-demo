@@ -11,6 +11,7 @@ description: auth-server-demo で PR を作る直前に回すチェック。全�
 
 ```bash
 ./mvnw -B -ntp clean verify
+python3 -m unittest discover -s .claude/hooks/tests   # フック（.claude/hooks/）そのもののテスト。数秒
 python3 .claude/hooks/harness_events.py pre-pr   # 落ちて直したものを記録へ（直してやり直すたびに流す）
 ```
 
@@ -18,6 +19,7 @@ python3 .claude/hooks/harness_events.py pre-pr   # 落ちて直したものを�
 - 落ちたら直してから次へ。**テストを消す・`@Disabled` にする・`rules:allow` を理由なしで書く、で緑にしない**
 - 規約テストの違反は `target/surefire-reports/*RulesTest.txt` に直し方つきで出る
 - ルールを足した・変えたなら、`CanaryRulesTest` に「当たるべき見本」と「当たってはいけない見本」を足す
+- フック（`stop_sensors.py`・`harness_events.py`）を変えたなら、`.claude/hooks/tests/` に振る舞いのテストを足す
 
 ## 2. 推論系センサー
 
