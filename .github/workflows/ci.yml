@@ -33,10 +33,12 @@ jobs:
           cache: maven
 
       - name: Build and test
+        id: verify
         run: ./mvnw -B -ntp verify
 
       # ハーネスのフック（Stop フック・事象の口）そのもののテスト（docs/harness.md §7.1）。標準ライブラリだけ・数秒
       - name: Test harness hooks
+        id: hooks
         if: success() || failure()   # verify が落ちてもフックのテストの結果は出す（取り消しのときは流さない）
         run: python3 -m unittest discover -s .claude/hooks/tests -v
 
@@ -44,7 +46,8 @@ jobs:
         if: always()
         env:
           HARNESS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: python3 .claude/hooks/harness_events.py ci --status ${{ job.status }}
+        # どの段で落ちたかを ci/result の failed_steps に残す（docs/harness.md §4・PR #9 Y2 案A）
+        run: python3 .claude/hooks/harness_events.py ci --status ${{ job.status }} --steps "verify=${{ steps.verify.outcome }},hooks=${{ steps.hooks.outcome }}"
 
       - name: Upload harness events (always)
         if: always()

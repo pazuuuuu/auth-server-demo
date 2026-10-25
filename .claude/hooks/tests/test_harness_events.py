@@ -73,6 +73,28 @@ class HarnessEventsTest(RepoTestCase):
         self.events("ci", "--status", "success", GITHUB_REF="refs/pull/7/merge")
         self.assertEqual(self.ci_rows()[-1]["pr"], 7)
 
+    def test_ciは段ごとの結果と落ちた段を残す(self):
+        self.events("ci", "--status", "failure", "--steps", "verify=success,hooks=failure")
+        result = self.ci_rows()[-1]
+        self.assertEqual(result["steps"], {"verify": "success", "hooks": "failure"})
+        self.assertEqual(result["failed_steps"], ["hooks"])
+
+    def test_ciは両方の段が落ちれば両方を残し_流れなかった段は落ちたとみなさない(self):
+        self.events("ci", "--status", "failure", "--steps", "verify=failure,hooks=failure")
+        self.assertEqual(self.ci_rows()[-1]["failed_steps"], ["verify", "hooks"])
+        self.events("ci", "--status", "cancelled", "--steps", "verify=cancelled,hooks=skipped")
+        self.assertEqual(self.ci_rows()[-1]["failed_steps"], [])
+
+    def test_ciはstepsが無ければ段の項目を足さない(self):
+        self.events("ci", "--status", "success")
+        result = self.ci_rows()[-1]
+        self.assertNotIn("steps", result)
+        self.assertNotIn("failed_steps", result)
+
+    def test_ciは名前か結果が空の段を捨てる(self):
+        self.events("ci", "--status", "success", "--steps", "verify=success,hooks=,=failure")
+        self.assertEqual(self.ci_rows()[-1]["steps"], {"verify": "success"})
+
     def test_ciは前の回のファイルに足さず作り直す(self):
         self.events("ci", "--status", "failure")
         self.events("ci", "--status", "success")
